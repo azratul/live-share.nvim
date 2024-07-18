@@ -1,0 +1,49 @@
+*live-share.txt*
+*live-share_help*
+===================================================================================
+CONTENTS                                                          *live-share.nvim*
+
+
+live-share.nvim is designed to create a "Live Share" server in Neovim, similar to
+the Visual Studio Code Live Share functionality. The main command defined is
+:LiveShareServer, which executes a Lua function to start the "Live Share". The
+plugin relies heavily on another plugin called jbyuki/instant.nvim and serveo.net.
+
+    1. Commands..........................................|liveshare_commands|
+    2. Configuration.......................................|liveshare_config|
+
+To find out more:
+https://github.com/azratul/live-share.nvim
+
+===================================================================================
+COMMANDS                                                       *liveshare_commands*
+
+
+:LiveShareServer [port]                                           *LiveShareServer*
+Starts the Live Share server on the specified port.
+    E.g. :LiveShareServer 9876
+
+:LiveShareJoin [url] [port]                                         *LiveShareJoin*
+Joins an existing Live Share session using the specified URL and port.
+    E.g. :LiveShareJoin abc.serveo.net 80
+
+Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's
+recommended not to change the port as serveo.net typically uses port 80 by default.
+
+===================================================================================
+CONFIGURATION                                                    *liveshare_config*
+
+You can customize the behavior of live-share.nvim by configuring the following
+settings in your Neovim configuration file.
+
+
+```lua
+require("live-share").setup({
+  port_internal = 9876, -- The local port to be used for the live share connection
+  max_attempts = 10, -- Maximum number of attempts to read the URL from serveo.net, every 250 ms
+  serveo_url = "/tmp/serveo.url", -- Path to the file where the URL from serveo.net will be stored
+  serveo_pid = "/tmp/serveo.pid" -- Path to the file where the PID of the SSH process will be stored
+})
+```
+
+vim:ft=help:et:ts=2:sw=2:sts=2:norl
