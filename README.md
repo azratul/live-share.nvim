@@ -4,6 +4,8 @@
 
 This plugin creates a "Live Share" server in Neovim, similar to the Visual Studio Code Live Share functionality. It relies heavily on another plugin called [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) and [serveo.net](https://serveo.net/).
 
+Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions.
+
 ## Installation
 
 ### Using Packer
