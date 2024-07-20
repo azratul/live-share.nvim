@@ -6,8 +6,9 @@ function M.setup(config)
         port = config.port or 80,
         port_internal = config.port_internal or 9876,
         max_attempts = config.max_attempts or 40,
-        serveo_url = config.serveo_url or "/tmp/serveo.url",
-        serveo_pid = config.serveo_pid or "/tmp/serveo.pid",
+        service_url = config.service_url or "/tmp/service.url",
+        service_pid = config.service_pid or "/tmp/service.pid",
+        service = "localhost.run",
         ssh_pid = nil
     }
 

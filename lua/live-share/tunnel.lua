@@ -13,12 +13,14 @@ function M.setup(config)
 end
 
 function M.start(port)
-    local serveo_url = M.config.serveo_url
-    local serveo_pid = M.config.serveo_pid
+    local service_url = M.config.service_url
+    local service_pid = M.config.service_pid
+    local service = M.config.service
     local port_internal = port or M.config.port_internal
-    local ssh_command = string.format("ssh -o StrictHostKeyChecking=no -R %d:localhost:%d serveo.net > %s 2>/dev/null & echo $! > %s", M.config.port, port_internal, serveo_url, serveo_pid)
-    os.execute(ssh_command)
-    local handle = io.popen("cat " .. serveo_pid)
+    local command = string.format("ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null & echo $! > %s", M.config.port, port_internal,service, service_url, service_pid)
+
+    os.execute(command)
+    local handle = io.popen("cat " .. service_pid)
     local result = handle:read("*a")
     handle:close()
     M.config.ssh_pid = result:match("%d+")
@@ -29,12 +31,17 @@ function M.start(port)
 
     local function check_url()
       attempt = attempt + 1
-      local file = io.open(serveo_url, "r")
+      local file = io.open(service_url, "r")
       if file then
         local result = file:read("*a")
         file:close()
         if result and result ~= "" then
-          local url = result:match("https://[%w._-]+")
+          local url
+          if service == "localhost.run" then
+            url = result:match("https://[%w._-]+.lhr.life")
+          else
+            url = result:match("https://[%w._-]+")
+          end
           vim.fn.setreg('+', url)
           vim.api.nvim_out_write("The URL has been copied to the clipboard\n")
         else

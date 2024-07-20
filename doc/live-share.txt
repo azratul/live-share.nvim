@@ -40,9 +40,9 @@ settings in your Neovim configuration file.
 ```lua
 require("live-share").setup({
   port_internal = 9876, -- The local port to be used for the live share connection
-  max_attempts = 10, -- Maximum number of attempts to read the URL from serveo.net, every 250 ms
-  serveo_url = "/tmp/serveo.url", -- Path to the file where the URL from serveo.net will be stored
-  serveo_pid = "/tmp/serveo.pid" -- Path to the file where the PID of the SSH process will be stored
+  max_attempts = 10, -- Maximum number of attempts to read the URL from service(serveo or localtunnel), every 250 ms
+  service_url = "/tmp/service.url", -- Path to the file where the URL from service(serveo or localtunnel) will be stored
+  service_pid = "/tmp/service.pid" -- Path to the file where the PID of the process will be stored
 })
 ```
 

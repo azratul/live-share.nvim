@@ -45,6 +45,8 @@ Plug 'jbyuki/instant.nvim'
 - `:LiveShareJoin [url] [port]`: Join a Live Share session.
     Example: `:LiveShareJoin abc.serveo.net 80`
 
+After starting the server, wait for the message indicating the URL has been copied. This URL is copied to the clipboard and should be shared with the client who wants to connect to the session.
+
 Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's recommended not to change the port as serveo.net typically uses port 80 by default.
 
 ## Basic settings
@@ -55,9 +57,10 @@ These settings are optional. You don't need to change them unless you want to cu
 ```lua
 require("live-share").setup({
   port_internal = 9876, -- The local port to be used for the live share connection
-  max_attempts = 20, -- Maximum number of attempts to read the URL from serveo.net, every 250 ms
-  serveo_url = "/tmp/serveo.url", -- Path to the file where the URL from serveo.net will be stored
-  serveo_pid = "/tmp/serveo.pid" -- Path to the file where the PID of the SSH process will be stored
+  max_attempts = 20, -- Maximum number of attempts to read the URL from service(serveo.net or localhost.run), every 250 ms
+  service_url = "/tmp/service.url", -- Path to the file where the URL from serveo.net will be stored
+  service_pid = "/tmp/service.pid", -- Path to the file where the PID of the SSH process will be stored
+  service = "localhost.run", -- Service to use, options are serveo.net or localhost.run
 })
 ```
 
@@ -70,9 +73,11 @@ require("live-share").setup({
     "jbyuki/instant.nvim",
   },
   config = function()
+    vim.g.instant_username = "your-username"
     require("live-share").setup({
       port_internal = 8765,
-      max_attempts = 40 -- 10 seconds
+      max_attempts = 40, -- 10 seconds
+      service = "serveo.net"
     })
   end
 }
