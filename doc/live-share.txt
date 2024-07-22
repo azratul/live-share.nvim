@@ -7,7 +7,7 @@ CONTENTS                                                          *live-share.nv
 live-share.nvim is designed to create a "Live Share" server in Neovim, similar to
 the Visual Studio Code Live Share functionality. The main command defined is
 :LiveShareServer, which executes a Lua function to start the "Live Share". The
-plugin relies heavily on another plugin called jbyuki/instant.nvim and serveo.net.
+plugin relies heavily on another plugin called jbyuki/instant.nvim and reverse tunneling services like serveo.net and localhost.run.
 
     1. Commands..........................................|liveshare_commands|
     2. Configuration.......................................|liveshare_config|
@@ -28,7 +28,7 @@ Joins an existing Live Share session using the specified URL and port.
     E.g. :LiveShareJoin abc.serveo.net 80
 
 Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's
-recommended not to change the port as serveo.net typically uses port 80 by default.
+recommended not to change the port as serveo.net and localhost.run typically uses port 80 by default.
 
 ===================================================================================
 CONFIGURATION                                                    *liveshare_config*
@@ -42,7 +42,8 @@ require("live-share").setup({
   port_internal = 9876, -- The local port to be used for the live share connection
   max_attempts = 10, -- Maximum number of attempts to read the URL from service(serveo or localtunnel), every 250 ms
   service_url = "/tmp/service.url", -- Path to the file where the URL from service(serveo or localtunnel) will be stored
-  service_pid = "/tmp/service.pid" -- Path to the file where the PID of the process will be stored
+  service_pid = "/tmp/service.pid", -- Path to the file where the PID of the process will be stored
+  service = "localhost.run", -- Service to use, options are serveo.net or localhost.run
 })
 ```
 

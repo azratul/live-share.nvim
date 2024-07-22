@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plugin creates a "Live Share" server in Neovim, similar to the Visual Studio Code Live Share functionality. It relies heavily on another plugin called [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) and [serveo.net](https://serveo.net/).
+This plugin creates a "Live Share" server in Neovim, similar to the Visual Studio Code Live Share functionality. It relies heavily on another plugin called [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) and reverse tunneling services like [serveo.net](https://serveo.net/) and [localhost.run](https://localhost.run/).
 
 Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions.
 
@@ -47,7 +47,7 @@ Plug 'jbyuki/instant.nvim'
 
 After starting the server, wait for the message indicating the URL has been copied. This URL is copied to the clipboard and should be shared with the client who wants to connect to the session.
 
-Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's recommended not to change the port as serveo.net typically uses port 80 by default.
+Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's recommended not to change the port as serveo.net and localhost.run typically uses port 80 by default.
 
 ## Basic settings
 
@@ -86,6 +86,11 @@ require("live-share").setup({
 ## Contributing
 
 Feel free to open issues or submit pull requests if you find any bugs or have feature requests.
+
+
+## Credits
+
+[instant.nvim](https://github.com/jbyuki/instant.nvim) - No longer maintained.
 
 
 ## License
