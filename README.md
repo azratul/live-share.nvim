@@ -49,6 +49,10 @@ After starting the server, wait for the message indicating the URL has been copi
 
 Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's recommended not to change the port as serveo.net and localhost.run typically uses port 80 by default.
 
+### Preview
+
+![Live Share Preview](https://raw.githubusercontent.com/azratul/azratul/86d27acdbe36f0d4402a21e13b79fafbaec1ffc9/live-share.gif)
+
 ## Basic settings
 
 These settings are optional. You don't need to change them unless you want to customize the plugin's behavior.
