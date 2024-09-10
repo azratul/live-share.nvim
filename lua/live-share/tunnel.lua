@@ -48,7 +48,7 @@ function M.start(port)
 			file:close()
 			if result and result ~= "" then
 				local url
-				if service == "localhost.run" then
+				if service == "localhost.run" or service == "nokey@localhost.run" then
 					url = result:match("https://[%w._-]+.lhr.life")
 				else
 					url = result:match("https://[%w._-]+")
