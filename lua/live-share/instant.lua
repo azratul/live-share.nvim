@@ -7,8 +7,8 @@ end
 function M.start(port)
     port = port or M.config.port_internal
 
-    vim.cmd('InstantStartServer 0.0.0.0 ' .. port)
-    vim.cmd('InstantStartSession 0.0.0.0 ' .. port)
+    vim.cmd('InstantStartServer ' .. M.config.ip_local .. ' ' .. port)
+    vim.cmd('InstantStartSession ' .. M.config.ip_local .. ' ' .. port)
 end
 
 function M.join(url, port)

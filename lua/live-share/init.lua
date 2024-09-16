@@ -8,7 +8,8 @@ function M.setup(config)
         max_attempts = config.max_attempts or 40,
         service_url = config.service_url or "/tmp/service.url",
         service_pid = config.service_pid or "/tmp/service.pid",
-        service = config.service or "localhost.run",
+        service = config.service or "nokey@localhost.run",
+        ip_local = config.ip_local or "127.0.0.1",
         ssh_pid = nil
     }
 
