@@ -11,10 +11,6 @@ Note: This plugin is designed to work exclusively between Neovim instances and i
 - **SSH**: You must have SSH installed on your system. This is required for tunneling with services like serveo.net or localhost.run.
 - **Tested Environments**: This plugin has been tested on **Linux** and **OpenBSD** distributions. It has not been tested or officially supported on **macOS** or **Windows**.
 
-### Important Note for localhost.run Users
-
-In certain cases, to ensure localhost.run works correctly (based on tests with Ubuntu Studio 24.04), it may be necessary to use **nokey@localhost.run** instead of just **localhost.run**. This requirement can vary depending on the specific system configuration. Additionally, if you execute it via SSH without forwarding your graphical environment(ssh -X), you won't have access to the clipboard. In that case, you'll need to retrieve the URL from the `/tmp/service.url` file.
-
 ## Installation
 
 ### Using Packer
