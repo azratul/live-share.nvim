@@ -1,5 +1,13 @@
 # Live Share Plugin for Neovim
 
+[![total lines](https://tokei.rs/b1/github/azratul/live-share.nvim)](https://github.com/XAMPPRocky/tokei)
+![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/azratul/live-share.nvim)
+![GitHub repo size](https://img.shields.io/github/repo-size/azratul/live-share.nvim)
+
+<a href="https://dotfyle.com/plugins/azratul/live-share.nvim">
+	<img src="https://dotfyle.com/plugins/azratul/live-share.nvim/shield?style=flat-square" />
+</a>
+
 ## Overview
 
 This plugin creates a "Live Share" server in Neovim, similar to the Visual Studio Code Live Share functionality. It relies heavily on another plugin called [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) and reverse tunneling services like [serveo.net](https://serveo.net/) and [localhost.run](https://localhost.run/).
