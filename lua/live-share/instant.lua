@@ -5,6 +5,10 @@ function M.setup(config)
 end
 
 function M.start(port)
+    if not M.config then
+        error("Configuration not set. Please call setup() first.")
+    end
+
     port = port or M.config.port_internal
 
     vim.cmd('InstantStartServer ' .. M.config.ip_local .. ' ' .. port)
@@ -12,6 +16,10 @@ function M.start(port)
 end
 
 function M.join(url, port)
+    if not M.config then
+        error("Configuration not set. Please call setup() first.")
+    end
+
     url = url:gsub("^https?://", "")
     port = port or M.config.port
     vim.cmd('InstantJoinSession ' .. url .. ' ' .. port)
