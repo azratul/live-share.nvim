@@ -22,6 +22,14 @@ function M.start(port)
     local command
 
     if is_win then
+        local service_file = io.open(service_url, "w")
+        if service_file then
+            service_file:close()
+        else
+            vim.api.nvim_err_writeln("Failed to create the service URL file")
+            return
+        end
+
         command = string.format(
             'bash -c (ssh -n -o StrictHostKeyChecking=no -R %d:localhost:%d %s 2>/dev/null) | while read line; do echo "$line" >> "%s"; done',
             M.config.port,
