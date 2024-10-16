@@ -17,7 +17,7 @@ Note: This plugin is designed to work exclusively between Neovim instances and i
 ### Requirements
 
 - **SSH**: You must have SSH installed on your system. This is required for tunneling with services like serveo.net or localhost.run.
-- **Tested Environments**: This plugin has been tested on **Linux** and **OpenBSD** distributions. It has not been tested or officially supported on **macOS** or **Windows**.
+- **Tested Environments**: This plugin has been tested on **Linux** and **OpenBSD** distributions. It has not been tested or officially supported on **macOS** or **Windows**(Windows compatibility only with GitBash).
 
 ## Installation
 
