@@ -20,6 +20,7 @@ function M.start(port)
     local is_win = package.config:sub(1, 1) == "\\"
 
     local command
+    local job_opts
 
     if is_win then
         local service_file = io.open(service_url, "w")
@@ -37,6 +38,8 @@ function M.start(port)
             service,
             service_url
         )
+
+        job_opts = {'bash', '-c', command}
     else
         command = string.format(
             "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
@@ -45,9 +48,11 @@ function M.start(port)
             service,
             service_url
         )
+
+        job_opts = command
     end
 
-    local job_id = vim.fn.jobstart(command, {detach = true})
+    local job_id = vim.fn.jobstart(job_opts, {detach = true})
 
     if job_id <= 0 then
         vim.api.nvim_err_writeln("Failed to start the SSH tunnel")
