@@ -32,7 +32,7 @@ function M.start(port)
         end
 
         command = string.format(
-            'bash -c (ssh -n -o StrictHostKeyChecking=no -R %d:localhost:%d %s 2>/dev/null) | while read line; do echo "$line" >> "%s"; done',
+            '(ssh -n -o StrictHostKeyChecking=no -R %d:localhost:%d %s 2>/dev/null) | while read line; do echo "$line" >> "%s"; done',
             M.config.port,
             port_internal,
             service,
