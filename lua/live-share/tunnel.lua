@@ -38,7 +38,7 @@ function M.start(port)
 
         vim.defer_fn(function()
             os.execute(command)
-        end, 500)
+        end, 1000)
     else
         command = string.format(
             "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null & echo $! > %s",
