@@ -6,8 +6,6 @@ vim.g.loaded_liveshare = true
 local save_cpo = vim.o.cpo
 vim.o.cpo = vim.o.cpo .. 'vim'
 
-require('live-share').setup()
-
 vim.api.nvim_create_user_command('LiveShareServer', function(opts)
   require("live-share.commands").start_live_share(tonumber(opts.args))
 end, { nargs = '?' })
