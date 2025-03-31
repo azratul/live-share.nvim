@@ -1,5 +1,42 @@
 local M = {}
 
+local services = {
+  ["serveo.net"] = {
+    command = function(cfg, port_internal, service_url)
+      return string.format(
+        "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
+        cfg.port,
+        port_internal,
+        cfg.service,
+        service_url
+      )
+    end,
+    pattern = "https://[%w._-]+"
+  },
+  ["localhost.run"] = {
+    command = function(cfg, port_internal, service_url)
+      return string.format(
+        "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
+        cfg.port,
+        port_internal,
+        cfg.service,
+        service_url
+      )
+    end,
+    pattern = "https://[%w._-]+.lhr.life"
+  },
+  ["ngrok"] = {
+    command = function(cfg, port_internal, service_url)
+      return string.format(
+        "ngrok tcp %d --log stdout > %s 2>/dev/null",
+        port_internal,
+        service_url
+      )
+    end,
+    pattern = "tcp://[%w._-]+%.ngrok.io:%d+"
+  }
+}
+
 function M.setup(config)
   M.config = config
 
@@ -13,49 +50,43 @@ function M.setup(config)
 end
 
 function M.start(port)
-  local service_url = M.config.service_url
   local service = M.config.service
+  local sconfig = services[service]
+
+  if not sconfig then
+    vim.api.nvim_err_writeln("Unsupported service: " .. service)
+    return
+  end
+
+  local service_url = M.config.service_url
   local port_internal = port or M.config.port_internal
-
   local is_win = package.config:sub(1, 1) == "\\"
-
   local command
   local job_opts
 
   if is_win then
     local service_file = io.open(service_url, "w")
-    if service_file then
-      service_file:close()
-    else
+    if not service_file then
       vim.api.nvim_err_writeln("Failed to create the service URL file")
       return
     end
+    service_file:close()
 
     command = string.format(
-      '(ssh -n -o StrictHostKeyChecking=no -R %d:localhost:%d %s 2>/dev/null) | while read line; do echo "$line" >> "%s"; done',
-      M.config.port,
-      port_internal,
-      service,
+      '( %s 2>/dev/null ) | while read line; do echo "$line" >> "%s"; done',
+      sconfig.command(M.config, port_internal, service_url),
       service_url
     )
 
     job_opts = { "bash", "-c", command }
   else
-    command = string.format(
-      "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
-      M.config.port,
-      port_internal,
-      service,
-      service_url
-    )
-
+    command = sconfig.command(M.config, port_internal, service_url)
     job_opts = command
   end
 
   local job_id = vim.fn.jobstart(job_opts, { detach = true })
-
   if job_id <= 0 then
-    vim.api.nvim_err_writeln("Failed to start the SSH tunnel")
+    vim.api.nvim_err_writeln("Failed to start tunnel")
     return
   end
 
@@ -64,48 +95,46 @@ function M.start(port)
   local max_attempts = M.config.max_attempts
   local attempt = 0
   local wait = 250
-
   local timer = vim.loop.new_timer()
 
   local function check_url()
     attempt = attempt + 1
-
     local file = io.open(service_url, "r")
     if file then
       local result = file:read("*a")
       file:close()
       if result and result ~= "" then
-        local url
-        if service == "localhost.run" or service == "nokey@localhost.run" then
-          url = result:match("https://[%w._-]+.lhr.life")
-        else
-          url = result:match("https://[%w._-]+")
-        end
+        local url = result:match(sconfig.pattern)
         if url then
+          if url:match("^tcp://") then
+            local host, port = url:match("^tcp://([^:]+):(%d+)")
+            if host and port then
+              url = string.format("http://%s:%s", host, port)
+            else
+              vim.api.nvim_err_writeln("Failed to extract host and port from URL")
+              return
+            end
+          end
+
           local clipboard_ok = pcall(vim.fn.setreg, "+", url)
           if clipboard_ok then
             vim.api.nvim_out_write("The URL has been copied to the clipboard\n")
           else
             vim.api.nvim_err_writeln("Failed to copy URL to the clipboard")
           end
-          timer:stop()
-          timer:close()
-        else
-          vim.api.nvim_err_writeln("Could not extract the URL from the file")
-        end
-      else
-        if attempt >= max_attempts then
-          vim.api.nvim_err_writeln("Service URL: Empty file")
+
           timer:stop()
           timer:close()
         end
-      end
-    else
-      if attempt >= max_attempts then
-        vim.api.nvim_err_writeln("Service URL: file not found")
+      elseif attempt >= max_attempts then
+        vim.api.nvim_err_writeln("Service URL: empty file")
         timer:stop()
         timer:close()
       end
+    elseif attempt >= max_attempts then
+      vim.api.nvim_err_writeln("Service URL: file not found")
+      timer:stop()
+      timer:close()
     end
   end
 

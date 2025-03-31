@@ -8,6 +8,24 @@
 	<img src="https://dotfyle.com/plugins/azratul/live-share.nvim/shield?style=flat-square" />
 </a>
 
+✨ v1.1.0 – Tunneling Upgrade
+
+    🆕 Added support for ngrok with automatic URL normalization.
+
+    🛠️ Default tunneling service is now serveo.net (due to instability in localhost.run).
+
+
+> ⚠️ **Heads up:** If the latest commit causes any issues, please [open an issue](https://github.com/azratul/live-share.nvim/issues).  
+> Meanwhile, you can use the last stable version by checking out the [`v0.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v0.1.0) tag:
+
+```lua
+-- packer.nvim
+use { "azratul/live-share.nvim", tag = "v1.0.0" }
+
+-- lazy.nvim
+{ "azratul/live-share.nvim", version = "v1.0.0" }
+```
+
 ## Overview
 
 This plugin creates a "Live Share" server in Neovim, similar to the Visual Studio Code Live Share functionality. It relies heavily on another plugin called [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) and reverse tunneling services like [serveo.net](https://serveo.net/) and [localhost.run](https://localhost.run/).
@@ -16,7 +34,16 @@ Note: This plugin is designed to work exclusively between Neovim instances and i
 
 ### Requirements
 
-- **SSH**: You must have SSH installed on your system. This is required for tunneling with services like serveo.net or localhost.run.
+- **Tunneling Binary**:
+  - If you're using `serveo.net` or `localhost.run`, you must have **SSH** installed.
+  - If you're using `ngrok`, you must:
+    - Have the `ngrok` CLI installed ([get it here](https://ngrok.com/download)).
+    - Run the following command once to authenticate:
+      ```bash
+      ngrok config add-authtoken <your_token>
+      ```
+    - ✅ **The free ngrok plan works perfectly** — you do **not** need a paid subscription.
+
 - **Tested Environments**: This plugin has been tested on **Linux** and **OpenBSD** distributions. It has not been tested or officially supported on **macOS** or **Windows**(Windows compatibility only with GitBash).
 
 ## Installation
