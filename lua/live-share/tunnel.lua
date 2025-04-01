@@ -1,28 +1,26 @@
 local M = {}
 
+local ssh_command = function(cfg, port_internal, service_url)
+  return string.format(
+    "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
+    cfg.port,
+    port_internal,
+    cfg.service,
+    service_url
+  )
+end
+
 local services = {
   ["serveo.net"] = {
-    command = function(cfg, port_internal, service_url)
-      return string.format(
-        "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
-        cfg.port,
-        port_internal,
-        cfg.service,
-        service_url
-      )
-    end,
+    command = ssh_command,
     pattern = "https://[%w._-]+",
   },
   ["localhost.run"] = {
-    command = function(cfg, port_internal, service_url)
-      return string.format(
-        "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
-        cfg.port,
-        port_internal,
-        cfg.service,
-        service_url
-      )
-    end,
+    command = ssh_command,
+    pattern = "https://[%w._-]+.lhr.life",
+  },
+  ["nokey@localhost.run"] = {
+    command = ssh_command,
     pattern = "https://[%w._-]+.lhr.life",
   },
   ["ngrok"] = {

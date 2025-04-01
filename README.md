@@ -16,7 +16,7 @@
 
 
 > ⚠️ **Heads up:** If the latest commit causes any issues, please [open an issue](https://github.com/azratul/live-share.nvim/issues).  
-> Meanwhile, you can use the last stable version by checking out the [`v0.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v0.1.0) tag:
+> Meanwhile, you can use the last stable version by checking out the [`v0.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v1.0.0) tag:
 
 ```lua
 -- packer.nvim
