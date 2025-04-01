@@ -106,16 +106,6 @@ function M.start(port)
       if result and result ~= "" then
         local url = result:match(sconfig.pattern)
         if url then
-          if url:match("^tcp://") then
-            local host, port = url:match("^tcp://([^:]+):(%d+)")
-            if host and port then
-              url = string.format("http://%s:%s", host, port)
-            else
-              vim.api.nvim_err_writeln("Failed to extract host and port from URL")
-              return
-            end
-          end
-
           local clipboard_ok = pcall(vim.fn.setreg, "+", url)
           if clipboard_ok then
             vim.api.nvim_out_write("The URL has been copied to the clipboard\n")

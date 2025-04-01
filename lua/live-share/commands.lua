@@ -12,6 +12,9 @@ end
 
 function M.join_live_share(url, port)
   port = port or M.config.port
+  if url:match("^tcp://") then
+    url, port = url:match("^tcp://([^:]+):(%d+)")
+  end
   require("live-share.instant").join(url, port)
 end
 
