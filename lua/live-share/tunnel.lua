@@ -11,7 +11,7 @@ local services = {
         service_url
       )
     end,
-    pattern = "https://[%w._-]+"
+    pattern = "https://[%w._-]+",
   },
   ["localhost.run"] = {
     command = function(cfg, port_internal, service_url)
@@ -23,18 +23,14 @@ local services = {
         service_url
       )
     end,
-    pattern = "https://[%w._-]+.lhr.life"
+    pattern = "https://[%w._-]+.lhr.life",
   },
   ["ngrok"] = {
     command = function(cfg, port_internal, service_url)
-      return string.format(
-        "ngrok tcp %d --log stdout > %s 2>/dev/null",
-        port_internal,
-        service_url
-      )
+      return string.format("ngrok tcp %d --log stdout > %s 2>/dev/null", port_internal, service_url)
     end,
-    pattern = "tcp://[%w._-]+%.ngrok.io:%d+"
-  }
+    pattern = "tcp://[%w._-]+%.ngrok.io:%d+",
+  },
 }
 
 function M.setup(config)
@@ -72,11 +68,15 @@ function M.start(port)
     end
     service_file:close()
 
-    command = string.format(
-      '( %s 2>/dev/null ) | while read line; do echo "$line" >> "%s"; done',
-      sconfig.command(M.config, port_internal, service_url),
-      service_url
-    )
+    local raw_command = sconfig.command(M.config, port_internal, service_url)
+    raw_command = raw_command:gsub(" > %S+%s*2>/dev/null", "")
+
+    if M.config.service ~= "ngrok" then
+      raw_command = raw_command:gsub("^ssh", "ssh -n")
+    end
+
+    command =
+      string.format('( %s 2>/dev/null ) | while read line; do echo "$line" >> "%s"; done', raw_command, service_url)
 
     job_opts = { "bash", "-c", command }
   else
