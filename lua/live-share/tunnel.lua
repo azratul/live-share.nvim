@@ -104,11 +104,15 @@ function M.start(port)
       if result and result ~= "" then
         local url = result:match(sconfig.pattern)
         if url then
-          local clipboard_ok = pcall(vim.fn.setreg, "+", url)
-          if clipboard_ok then
-            vim.api.nvim_out_write("The URL has been copied to the clipboard\n")
+          if vim.fn.has("clipboard") == 1 then
+            local clipboard_ok = pcall(vim.fn.setreg, "+", url)
+            if clipboard_ok then
+              vim.api.nvim_out_write("The URL has been copied to the clipboard\n")
+            else
+              vim.api.nvim_err_writeln("Failed to copy URL to the clipboard")
+            end
           else
-            vim.api.nvim_err_writeln("Failed to copy URL to the clipboard")
+            vim.api.nvim_out_write("Clipboard not available. URL: " .. url .. "\n")
           end
 
           timer:stop()
