@@ -54,14 +54,32 @@ Note: This plugin is designed to work exclusively between Neovim instances and i
 use {
   'azratul/live-share.nvim',
   requires = {'jbyuki/instant.nvim'}
+  config = function()
+    vim.g.instant_username = "your-username"
+    require("live-share").setup({
+      -- Add your configuration here
+    })
+  end
 }
 ```
 
 ### Using Vim-Plug
 
 ```vim
-Plug 'azratul/live-share.nvim'
+call plug#begin('~/.vim/plugged')
+
 Plug 'jbyuki/instant.nvim'
+Plug 'azratul/live-share.nvim'
+
+call plug#end()
+
+let g:instant_username = "your-username"
+
+lua << EOF
+require("live-share").setup({
+   -- Add your configuration here
+})
+EOF
 ```
 
 ### Using Lazy
@@ -71,7 +89,13 @@ Plug 'jbyuki/instant.nvim'
   "azratul/live-share.nvim",
   dependencies = {
     "jbyuki/instant.nvim",
-  }
+  },
+  config = function()
+    vim.g.instant_username = "your-username"
+    require("live-share").setup({
+     -- Add your configuration here
+    })
+  end
 }
 ```
 
