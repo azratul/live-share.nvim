@@ -1,5 +1,8 @@
 local M = {}
 
+local provider = require("live-share.provider")
+local services = provider.services
+
 local ssh_command = function(cfg, port_internal, service_url)
   return string.format(
     "ssh -o StrictHostKeyChecking=no -R %d:localhost:%d %s > %s 2>/dev/null",
@@ -10,26 +13,28 @@ local ssh_command = function(cfg, port_internal, service_url)
   )
 end
 
-local services = {
-  ["serveo.net"] = {
-    command = ssh_command,
-    pattern = "https://[%w._-]+",
-  },
-  ["localhost.run"] = {
-    command = ssh_command,
-    pattern = "https://[%w._-]+.lhr.life",
-  },
-  ["nokey@localhost.run"] = {
-    command = ssh_command,
-    pattern = "https://[%w._-]+.lhr.life",
-  },
-  ["ngrok"] = {
-    command = function(cfg, port_internal, service_url)
-      return string.format("ngrok tcp %d --log stdout > %s 2>/dev/null", port_internal, service_url)
-    end,
-    pattern = "tcp://[%w._-]+%.ngrok.io:%d+",
-  },
-}
+provider.register("serveo.net", {
+  command = ssh_command,
+  pattern = "https://[%w._-]+",
+})
+
+provider.register("localhost.run", {
+  command = ssh_command,
+  pattern = "https://[%w._-]+.lhr.life",
+})
+
+provider.register("nokey@localhost.run", {
+  command = ssh_command,
+  pattern = "https://[%w._-]+.lhr.life",
+})
+
+provider.register("ngrok", {
+  command = function(_, port_internal, service_url)
+    return string.format("ngrok tcp %d --log stdout > %s 2>/dev/null",
+                         port_internal, service_url)
+  end,
+  pattern = "tcp://[%w._-]+%.ngrok.io:%d+",
+})
 
 function M.setup(config)
   M.config = config
@@ -48,7 +53,7 @@ function M.start(port)
   local sconfig = services[service]
 
   if not sconfig then
-    vim.api.nvim_err_writeln("Unsupported service: " .. service)
+    vim.api.nvim_err_writeln("Unsupported service: " .. tostring(service))
     return
   end
 
