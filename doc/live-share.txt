@@ -11,6 +11,7 @@ plugin relies heavily on another plugin called jbyuki/instant.nvim and reverse t
 
     1. Commands..........................................|liveshare_commands|
     2. Configuration.......................................|liveshare_config|
+    3. Custom Providers....................................|liveshare_custom|
 
 To find out more:
 https://github.com/azratul/live-share.nvim
@@ -36,14 +37,40 @@ CONFIGURATION                                                    *liveshare_conf
 You can customize the behavior of live-share.nvim by configuring the following
 settings in your Neovim configuration file.
 
-
-```lua
+lua << EOF
 require("live-share").setup({
   port_internal = 9876, -- The local port to be used for the live share connection
   max_attempts = 10, -- Maximum number of attempts to read the URL from service(serveo or localtunnel), every 250 ms
   service_url = "/tmp/service.url", -- Path to the file where the URL from service(serveo or localtunnel) will be stored
   service = "localhost.run", -- Service to use, options are serveo.net or localhost.run
 })
-```
+EOF
+
+===================================================================================
+CUSTOM PROVIDERS                                                 *liveshare_custom*
+
+`live-share.nvim` now supports custom tunneling providers via the `register` API.
+
+Example:
+
+lua << EOF
+  local provider = require("live-share.provider")
+
+  provider.register("bore", {
+    command = function(_, port, outfile)
+      return string.format("bore local %d --to bore.pub > %s 2>/dev/null", port, outfile)
+    end,
+    pattern = "bore%.pub:%d+",
+  })
+
+  require("live-share").setup({
+    service = "bore",
+    port_internal = 8765,
+    max_attempts = 40,
+  })
+EOF
+
+This allows you to integrate any tunneling service that outputs a public URL, such as `bore`, `ngrok`, or custom SSH reverse tunnels.
+
 
 vim:ft=help:et:ts=2:sw=2:sts=2:norl

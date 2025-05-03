@@ -150,6 +150,46 @@ require("live-share").setup({
 }
 ```
 
+### Custom providers
+
+Now the plugin supports custom tunneling providers via the register API.
+
+```lua
+require("live-share.provider").register("bore", {
+  command = "your-command",
+  pattern = "your-regex-pattern",
+})
+```
+
+### Example with Bore service(Lazy)
+
+```lua
+  {
+    "azratul/live-share.nvim",
+    lazy = false,
+    dependencies = {
+      "jbyuki/instant.nvim",
+    },
+    config = function()
+      require("live-share.provider").register("bore", {
+        command = function(_, port, service_url)
+          return string.format(
+            "bore local %d --to bore.pub > %s 2>/dev/null",
+            port,
+            service_url
+          )
+        end,
+        pattern = "bore%.pub:%d+",
+      })
+
+      vim.g.instant_username = "your-username"
+      require("live-share").setup {
+        service = "bore",
+      }
+    end,
+  }
+```
+
 ## Contributing
 
 Feel free to open issues or submit pull requests if you find any bugs or have feature requests.
