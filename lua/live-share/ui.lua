@@ -137,7 +137,7 @@ end
 --
 -- Floating window listing all peers with their active file and cursor position.
 
-function M.show_participants()
+function M.show_peers()
   local presence = require("live-share.presence")
   local session  = require("live-share.session")
 

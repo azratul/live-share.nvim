@@ -68,7 +68,7 @@ end, {
 
 -- :LiveSharePeers
 cmd("LiveSharePeers", function()
-  require("live-share.commands").show_participants()
+  require("live-share.commands").show_peers()
 end, {
   desc = "Show all session peers and their positions",
 })

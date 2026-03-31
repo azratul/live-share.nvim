@@ -29,8 +29,6 @@ end
 -- ── Per-buffer autocmds ───────────────────────────────────────────────────────
 
 local function register_cursor_emit(b, path)
-  -- Capture position and selection synchronously at event time so the
-  -- 100 ms debounce delay does not cause a stale mode read.
   vim.api.nvim_create_autocmd("CursorMoved", {
     group  = cursor_aug,
     buffer = b,
@@ -69,8 +67,6 @@ local function register_cursor_emit(b, path)
     end,
   })
 
-  -- CursorMoved does not fire when leaving visual mode without moving the cursor
-  -- (e.g. <Esc>). Send an immediate clear so remote highlights don't linger.
   vim.api.nvim_create_autocmd("ModeChanged", {
     group    = cursor_aug,
     buffer   = b,
@@ -116,7 +112,6 @@ local function on_message(msg)
     guest_role      = msg.role or "rw"
     -- Register the host in presence so they appear in :LiveSharePeers.
     presence.update_peer(0, msg.host_name or "host")
-    -- Introduce ourselves so the host can display our name.
     tcp_client.send({ t = "hello_ack", name = get_username() })
     vim.schedule(function()
       local role_label = guest_role == "ro" and " [read-only]" or ""
@@ -167,7 +162,6 @@ local function on_message(msg)
   -- Host opened a new file during the session.
   elseif msg.t == "open_file" then
     if not msg.path then return end
-    -- Upgrade to editable if we already have a read-only copy and we're rw.
     local existing = buffer_registry.get_buf(msg.path)
     if existing and vim.b[existing].live_share_readonly and guest_role ~= "ro" then
       buffer_registry.set_editable(msg.path)
@@ -201,7 +195,6 @@ local function on_message(msg)
     end)
 
   -- ── file_response ─────────────────────────────────────────────────────────
-  -- Response to a file_request the guest sent.
   elseif msg.t == "file_response" then
     if not msg.path then return end
     local ro = msg.readonly or (guest_role == "ro")

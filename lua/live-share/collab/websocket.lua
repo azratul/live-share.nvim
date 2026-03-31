@@ -91,6 +91,7 @@ end
 
 -- ── Handshake helpers ───────────────────────────────────────────────────────
 
+-- Magic GUID from websocket protocol(https://www.rfc-editor.org/rfc/rfc6455)
 local WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 -- Generate a random 16-byte nonce, base64-encoded (the Sec-WebSocket-Key value).
@@ -219,7 +220,6 @@ function M.new_frame_reader()
       if opcode == 1 or opcode == 2 then  -- text or binary
         table.insert(payloads, payload)
       end
-      -- opcode 8 (close), 9 (ping), 10 (pong): ignore; TCP disconnect handles cleanup
     end
 
     return payloads

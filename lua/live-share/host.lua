@@ -7,10 +7,10 @@
 --   For files not open in Neovim the patch is applied directly to disk.
 local M = {}
 
-local server   = require("live-share.collab.server")
+local server    = require("live-share.collab.server")
 local workspace = require("live-share.workspace")
 local presence  = require("live-share.presence")
-local follow   = require("live-share.follow")
+local follow    = require("live-share.follow")
 local session   = require("live-share.session")
 local crypto    = require("live-share.collab.crypto")
 local log       = require("live-share.collab.log")
@@ -259,7 +259,6 @@ local function on_message(msg, from_peer)
 
     local t = tracked[path]
     if t and vim.api.nvim_buf_is_valid(t.buf_id) then
-      -- Apply to the live Neovim buffer (we're already on main thread via vim.schedule).
       local end_line = msg.count == -1 and -1 or (msg.lnum + msg.count)
       local lines    = type(msg.lines) == "table" and msg.lines or {}
       t.applying.value = true
@@ -294,7 +293,6 @@ local function on_message(msg, from_peer)
   elseif msg.t == "focus" then
     local label = (msg.name and msg.name ~= "") and msg.name or ("guest " .. from_peer)
     presence.update_focus(from_peer, msg.path, msg.name)
-    -- If we haven't seen this peer's name yet (hello_ack not received), show it now.
     presence.update_peer(from_peer, label)
     follow.maybe_follow(msg.path, nil, nil, from_peer)
     server.broadcast({
@@ -371,7 +369,6 @@ function M.start(port)
     group    = host_aug,
     callback = function(ev)
       local b = ev.buf
-      -- Defer: buftype and name are not yet finalised at BufAdd fire time.
       vim.schedule(function()
         local path = attach_buffer(b)
         if path then

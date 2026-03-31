@@ -39,13 +39,6 @@ function M.check()
   else
     vim.health.warn("'ssh' not found — only the 'ngrok' provider will work")
   end
-
-  -- ngrok (optional)
-  if vim.fn.executable("ngrok") == 1 then
-    vim.health.ok("'ngrok' found")
-  else
-    vim.health.info("'ngrok' not found (optional — only needed for the ngrok provider)")
-  end
 end
 
 return M

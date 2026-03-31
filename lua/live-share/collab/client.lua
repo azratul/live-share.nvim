@@ -53,7 +53,6 @@ local function do_connect(ip, port, key, host, mode, attempt)
     end
 
     if mode == "tcp" then
-      -- ── Raw TCP mode ─────────────────────────────────────────────────────
       dbg("TCP connected — raw TCP mode (encrypted=" .. tostring(key ~= nil) .. ")")
       local raw_reader = protocol.new_raw_reader(session_key)
 
@@ -116,7 +115,6 @@ local function do_connect(ip, port, key, host, mode, attempt)
           local rest    = hs_buf:sub(hend + 4)
           hs_buf = nil
 
-          -- Show full response for debugging
           dbg("WS handshake response: "
               .. headers:gsub("\r\n", " | "):sub(1, 300))
 

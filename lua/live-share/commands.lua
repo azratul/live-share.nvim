@@ -105,12 +105,12 @@ function M.open_workspace()
 end
 
 -- :LiveSharePeers
-function M.show_participants()
+function M.show_peers()
   if not session().active() then
     vim.notify("live-share: not in a session", vim.log.levels.WARN)
     return
   end
-  ui().show_participants()
+  ui().show_peers()
 end
 
 -- :LiveShareOpen <path>
