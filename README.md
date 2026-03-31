@@ -123,6 +123,8 @@ EOF
 | `:LiveShareUnfollow` | Both | Stop following. |
 | `:LiveSharePeers` | Both | Show connected participants and their cursor positions. |
 
+> **Migration note:** `:LiveShareServer` was renamed to `:LiveShareHostStart` in v2.0.0. The old command still works but emits a deprecation warning.
+
 After starting the server, wait for the message indicating the URL has been copied to the clipboard. Share that URL with anyone you want to invite.
 
 ### Preview

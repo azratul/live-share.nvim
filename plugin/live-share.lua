@@ -93,4 +93,14 @@ end, {
   desc = "Open a shared terminal (host: spawns shell; guest: connects automatically)",
 })
 
+-- :LiveShareServer is a deprecated alias for :LiveShareHostStart (renamed in v2.0.0)
+cmd("LiveShareServer", function(opts)
+  vim.notify("live-share: :LiveShareServer is deprecated, use :LiveShareHostStart", vim.log.levels.WARN)
+  local port = opts.args ~= "" and tonumber(opts.args) or nil
+  require("live-share.commands").host_start(port)
+end, {
+  nargs = "?",
+  desc  = "Deprecated alias for :LiveShareHostStart",
+})
+
 vim.o.cpo = save_cpo
