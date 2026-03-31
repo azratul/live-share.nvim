@@ -169,6 +169,8 @@ require("live-share").setup({ service = "bore" })
 
 ## Protocol overview
 
+For a detailed technical specification of the communication layer, message schemas, and synchronization strategy, see [PROTOCOL.md](./PROTOCOL.md).
+
 - **Transport**: WebSocket over TCP for HTTP tunnel providers (serveo, localhost.run); raw length-prefixed TCP for direct connections and ngrok. Auto-detected on the first 4 bytes of each connection.
 - **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message when a key is present. Falls back to plaintext JSON if OpenSSL is unavailable.
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
