@@ -1,0 +1,372 @@
+-- Guest (client) logic: connects to a host session, manages the remote
+-- workspace view, and handles all inbound protocol events.
+local M = {}
+
+local tcp_client      = require("live-share.collab.client")
+local buffer_registry = require("live-share.buffer_registry")
+local presence        = require("live-share.presence")
+local follow          = require("live-share.follow")
+local session         = require("live-share.session")
+local crypto          = require("live-share.collab.crypto")
+local log             = require("live-share.collab.log")
+local uv              = vim.uv or vim.loop
+
+local config          = nil
+local guest_role      = nil   -- "rw" | "ro" — set from the hello message
+local workspace_files = {}    -- flat list of paths in the remote workspace
+local workspace_root_name = nil
+local cursor_timer    = nil
+local cursor_aug      = vim.api.nvim_create_augroup("LiveShareGuestCursor", { clear = true })
+
+local function dbg(m) log.dbg("guest", m) end
+
+local function get_username()
+  return (config and config.username and config.username ~= "" and config.username)
+      or (vim.g.live_share_username ~= nil and vim.g.live_share_username ~= "" and vim.g.live_share_username)
+      or "guest"
+end
+
+-- ── Per-buffer autocmds ───────────────────────────────────────────────────────
+
+local function register_cursor_emit(b, path)
+  -- Capture position and selection synchronously at event time so the
+  -- 100 ms debounce delay does not cause a stale mode read.
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group  = cursor_aug,
+    buffer = b,
+    callback = function()
+      local pos  = vim.api.nvim_win_get_cursor(0)
+      local mode = vim.fn.mode()
+      local sel  = nil
+      if mode == "v" or mode == "V" or mode == "\22" then
+        local vstart = vim.fn.getpos("v")
+        local vend   = vim.fn.getpos(".")
+        local sl, sc = vstart[2] - 1, vstart[3] - 1
+        local el, ec = vend[2] - 1,   vend[3] - 1
+        if sl > el or (sl == el and sc > ec) then
+          sl, sc, el, ec = el, ec, sl, sc
+        end
+        if mode == "V" then sc = 0; ec = 2147483647 end
+        sel = { sl = sl, sc = sc, el = el, ec = ec }
+      end
+
+      if cursor_timer then cursor_timer:stop()
+      else cursor_timer = uv.new_timer() end
+      cursor_timer:start(100, 0, vim.schedule_wrap(function()
+        local cmsg = {
+          t    = "cursor",
+          path = path,
+          lnum = pos[1] - 1,
+          col  = pos[2],
+          name = get_username(),
+        }
+        if sel then
+          cmsg.sel_lnum = sel.sl; cmsg.sel_col = sel.sc
+          cmsg.sel_end_lnum = sel.el; cmsg.sel_end_col = sel.ec
+        end
+        tcp_client.send(cmsg)
+      end))
+    end,
+  })
+
+  -- CursorMoved does not fire when leaving visual mode without moving the cursor
+  -- (e.g. <Esc>). Send an immediate clear so remote highlights don't linger.
+  vim.api.nvim_create_autocmd("ModeChanged", {
+    group    = cursor_aug,
+    buffer   = b,
+    callback = function()
+      local old = vim.v.event.old_mode
+      if old == "v" or old == "V" or old == "\22" then
+        local pos = vim.api.nvim_win_get_cursor(0)
+        tcp_client.send({
+          t    = "cursor",
+          path = path,
+          lnum = pos[1] - 1,
+          col  = pos[2],
+          name = get_username(),
+        })
+      end
+    end,
+  })
+end
+
+-- Tell the host which file the guest is currently looking at.
+local function register_focus_emit(b, path)
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group  = cursor_aug,
+    buffer = b,
+    callback = function()
+      tcp_client.send({ t = "focus", path = path, name = get_username() })
+    end,
+  })
+end
+
+local function register_autocmds(b, path)
+  register_cursor_emit(b, path)
+  register_focus_emit(b, path)
+end
+
+-- ── Message handler ───────────────────────────────────────────────────────────
+
+local function on_message(msg)
+  -- ── hello ─────────────────────────────────────────────────────────────────
+  if msg.t == "hello" then
+    session.peer_id = msg.peer_id
+    session.sid     = msg.sid
+    guest_role      = msg.role or "rw"
+    -- Register the host in presence so they appear in :LiveSharePeers.
+    presence.update_peer(0, msg.host_name or "host")
+    -- Introduce ourselves so the host can display our name.
+    tcp_client.send({ t = "hello_ack", name = get_username() })
+    vim.schedule(function()
+      local role_label = guest_role == "ro" and " [read-only]" or ""
+      vim.api.nvim_out_write(
+        "live-share: connected as " .. get_username() .. role_label
+        .. " (host: " .. (msg.host_name or "?") .. ")\n")
+      if guest_role == "ro" then
+        vim.notify("live-share: you joined as read-only — editing is disabled", vim.log.levels.WARN)
+      end
+    end)
+
+  -- ── rejected ─────────────────────────────────────────────────────────────
+  elseif msg.t == "rejected" then
+    vim.schedule(function()
+      vim.api.nvim_err_writeln(
+        "live-share: connection rejected by host: " .. (msg.reason or "no reason given"))
+      M.stop()
+    end)
+
+  -- ── peers_snapshot ────────────────────────────────────────────────────────
+  -- Received on join: presence snapshot of all already-connected peers.
+  elseif msg.t == "peers_snapshot" then
+    for _, p in ipairs(msg.peers or {}) do
+      presence.update_peer(p.peer_id, p.name, p.active_path)
+    end
+
+  -- ── workspace_info ────────────────────────────────────────────────────────
+  -- Received right after hello: the full flat file list of the remote workspace.
+  elseif msg.t == "workspace_info" then
+    workspace_files     = msg.files or {}
+    workspace_root_name = msg.root_name
+    vim.schedule(function()
+      vim.api.nvim_out_write(
+        "live-share: workspace '" .. (workspace_root_name or "?") .. "' ("
+        .. #workspace_files .. " files). Use :LiveShareWorkspace to explore.\n")
+    end)
+
+  -- ── open_files_snapshot ───────────────────────────────────────────────────
+  -- Host's currently open files: create editable buffers for all of them.
+  elseif msg.t == "open_files_snapshot" then
+    for _, f in ipairs(msg.files or {}) do
+      local b = buffer_registry.open(f.path, f.lines, session.sid, guest_role == "ro")
+      if guest_role ~= "ro" then register_autocmds(b, f.path) end
+    end
+    dbg("received open_files_snapshot (" .. #(msg.files or {}) .. " file(s))")
+
+  -- ── open_file ─────────────────────────────────────────────────────────────
+  -- Host opened a new file during the session.
+  elseif msg.t == "open_file" then
+    if not msg.path then return end
+    -- Upgrade to editable if we already have a read-only copy and we're rw.
+    local existing = buffer_registry.get_buf(msg.path)
+    if existing and vim.b[existing].live_share_readonly and guest_role ~= "ro" then
+      buffer_registry.set_editable(msg.path)
+      buffer_registry.apply(msg.path, { lnum = 0, count = -1, lines = msg.lines or {} })
+    else
+      local b = buffer_registry.open(msg.path, msg.lines, session.sid, guest_role == "ro")
+      if guest_role ~= "ro" then register_autocmds(b, msg.path) end
+    end
+
+    if follow.is_enabled() then
+      local b = buffer_registry.get_buf(msg.path)
+      vim.schedule(function()
+        if b then vim.api.nvim_set_current_buf(b) end
+      end)
+    else
+      vim.schedule(function()
+        vim.api.nvim_out_write(
+          "live-share: host opened " .. msg.path
+          .. "  (follow mode is off — use :LiveShareFollow to auto-switch)\n")
+      end)
+    end
+
+  -- ── close_file ────────────────────────────────────────────────────────────
+  elseif msg.t == "close_file" then
+    if not msg.path then return end
+    local b = buffer_registry.get_buf(msg.path)
+    if b then presence.clear_buf(b) end
+    buffer_registry.close(msg.path)
+    vim.schedule(function()
+      vim.api.nvim_out_write("live-share: host closed " .. msg.path .. "\n")
+    end)
+
+  -- ── file_response ─────────────────────────────────────────────────────────
+  -- Response to a file_request the guest sent.
+  elseif msg.t == "file_response" then
+    if not msg.path then return end
+    local ro = msg.readonly or (guest_role == "ro")
+    local b = buffer_registry.open(msg.path, msg.lines, session.sid, ro)
+    if not ro then
+      register_autocmds(b, msg.path)
+    end
+    vim.schedule(function()
+      vim.api.nvim_set_current_buf(b)
+    end)
+
+  -- ── patch ─────────────────────────────────────────────────────────────────
+  elseif msg.t == "patch" then
+    if msg.path then
+      vim.schedule(function() buffer_registry.apply(msg.path, msg) end)
+    end
+
+  -- ── save_file ─────────────────────────────────────────────────────────────
+  elseif msg.t == "save_file" then
+    if msg.path then
+      vim.schedule(function()
+        vim.api.nvim_out_write("live-share: host saved " .. msg.path .. "\n")
+      end)
+    end
+
+  -- ── focus ─────────────────────────────────────────────────────────────────
+  -- A peer switched their active buffer.
+  elseif msg.t == "focus" then
+    if not msg.path then return end
+    presence.update_focus(msg.peer, msg.path, msg.name)
+    follow.maybe_follow(msg.path, nil, nil, msg.peer)
+
+  -- ── cursor ────────────────────────────────────────────────────────────────
+  elseif msg.t == "cursor" then
+    if not msg.path then return end
+    local b = buffer_registry.get_buf(msg.path)
+    if not b then return end
+    local name = msg.name or (msg.peer == 0 and "host") or nil
+    local sel  = msg.sel_lnum and {
+      lnum = msg.sel_lnum, col = msg.sel_col,
+      end_lnum = msg.sel_end_lnum, end_col = msg.sel_end_col,
+    } or nil
+    vim.schedule(function()
+      presence.update_cursor(b, msg.peer, msg.lnum, msg.col, name, msg.path, sel)
+    end)
+
+  -- ── bye ───────────────────────────────────────────────────────────────────
+  elseif msg.t == "bye" then
+    presence.remove_peer(msg.peer)
+    local label = msg.name or (msg.peer == 0 and "host") or ("peer " .. tostring(msg.peer))
+    vim.schedule(function()
+      vim.api.nvim_out_write("live-share: " .. label .. " left\n")
+    end)
+
+  -- ── terminal_open ─────────────────────────────────────────────────────────
+  elseif msg.t == "terminal_open" then
+    vim.schedule(function()
+      require("live-share.shared_terminal").open_guest(msg.term_id, msg.name)
+    end)
+
+  -- ── terminal_data ─────────────────────────────────────────────────────────
+  elseif msg.t == "terminal_data" then
+    vim.schedule(function()
+      require("live-share.shared_terminal").on_data(msg.term_id, msg.data)
+    end)
+
+  -- ── terminal_close ────────────────────────────────────────────────────────
+  elseif msg.t == "terminal_close" then
+    vim.schedule(function()
+      require("live-share.shared_terminal").on_close(msg.term_id)
+    end)
+  end
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
+
+function M.setup(cfg)
+  config      = cfg
+  log.enabled = cfg and cfg.debug or false
+end
+
+function M.connect(host_addr, port, key_b64, mode)
+  session.role = "guest"
+
+  local session_key = nil
+  if key_b64 and key_b64 ~= "" then
+    if crypto.available then
+      session_key = crypto.b64url_decode(key_b64)
+    else
+      vim.notify("live-share: cannot decrypt — OpenSSL not found", vim.log.levels.ERROR)
+      session.role = nil
+      return
+    end
+  end
+  session.key = session_key
+
+  -- Wire up local-edit → server callback (read-only guests never send patches).
+  buffer_registry.setup(function(_, patch)
+    if guest_role ~= "ro" then tcp_client.send(patch) end
+  end)
+
+  -- Follow mode callback: switch to the host's active buffer.
+  follow.setup(function(path, lnum, col)
+    local b = buffer_registry.get_buf(path)
+    if not b then
+      -- We don't have the file yet — request it and switch when it arrives.
+      tcp_client.send({ t = "file_request", path = path })
+    else
+      vim.schedule(function()
+        vim.api.nvim_set_current_buf(b)
+        if lnum then
+          pcall(vim.api.nvim_win_set_cursor, 0, { lnum + 1, col or 0 })
+        end
+      end)
+    end
+  end)
+
+  require("live-share.shared_terminal").setup("guest", function(msg) tcp_client.send(msg) end)
+  tcp_client.setup(on_message)
+  tcp_client.connect(host_addr, tonumber(port), session_key, mode or "ws")
+end
+
+-- Request a specific file from the host workspace and open it.
+-- If the buffer already exists, just switch to it.
+function M.request_file(path)
+  if session.role ~= "guest" then
+    vim.notify("live-share: not connected as guest", vim.log.levels.WARN)
+    return
+  end
+  local b = buffer_registry.get_buf(path)
+  if b then
+    vim.api.nvim_set_current_buf(b)
+    return
+  end
+  tcp_client.send({ t = "file_request", path = path })
+end
+
+function M.get_role()
+  return guest_role
+end
+
+function M.get_workspace_files()
+  return workspace_files
+end
+
+function M.get_workspace_root_name()
+  return workspace_root_name
+end
+
+function M.stop()
+  vim.api.nvim_clear_autocmds({ group = cursor_aug })
+  if cursor_timer then
+    cursor_timer:stop()
+    cursor_timer:close()
+    cursor_timer = nil
+  end
+  presence.clear_all()
+  follow.reset()
+  require("live-share.shared_terminal").stop()
+  buffer_registry.close_all()
+  tcp_client.stop()
+  workspace_files     = {}
+  workspace_root_name = nil
+  guest_role          = nil
+  session.reset()
+end
+
+return M
