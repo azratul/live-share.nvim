@@ -41,9 +41,7 @@ function M.setup(config)
 
   vim.api.nvim_create_autocmd("VimLeavePre", {
     callback = function()
-      if M.config.ssh_pid then
-        vim.fn.jobstop(M.config.ssh_pid)
-      end
+      M.stop()
     end,
   })
 end
@@ -109,6 +107,12 @@ function M.start(port)
       if result and result ~= "" then
         local url = result:match(sconfig.pattern)
         if url then
+          -- Append encryption key fragment when available (invisible to tunnel server)
+          local ok_host, h = pcall(require, "live-share.host")
+          if ok_host then
+            url = url .. h.get_key_fragment()
+          end
+
           if vim.fn.has("clipboard") == 1 then
             local clipboard_ok = pcall(vim.fn.setreg, "+", url)
             if clipboard_ok then
@@ -136,6 +140,13 @@ function M.start(port)
   end
 
   timer:start(wait, wait, vim.schedule_wrap(check_url))
+end
+
+function M.stop()
+  if M.config and M.config.ssh_pid then
+    vim.fn.jobstop(M.config.ssh_pid)
+    M.config.ssh_pid = nil
+  end
 end
 
 return M

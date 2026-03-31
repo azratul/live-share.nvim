@@ -1,8 +1,16 @@
+LiveShareFollow	live-share.txt	/*LiveShareFollow*
+LiveShareHostStart	live-share.txt	/*LiveShareHostStart*
 LiveShareJoin	live-share.txt	/*LiveShareJoin*
-LiveShareServer	live-share.txt	/*LiveShareServer*
+LiveShareOpen	live-share.txt	/*LiveShareOpen*
+LiveSharePeers	live-share.txt	/*LiveSharePeers*
+LiveShareStop	live-share.txt	/*LiveShareStop*
+LiveShareTerminal	live-share.txt	/*LiveShareTerminal*
+LiveShareUnfollow	live-share.txt	/*LiveShareUnfollow*
+LiveShareWorkspace	live-share.txt	/*LiveShareWorkspace*
 live-share.nvim	live-share.txt	/*live-share.nvim*
 live-share.txt	live-share.txt	/*live-share.txt*
 live-share_help	live-share.txt	/*live-share_help*
 liveshare_commands	live-share.txt	/*liveshare_commands*
 liveshare_config	live-share.txt	/*liveshare_config*
 liveshare_custom	live-share.txt	/*liveshare_custom*
+liveshare_providers	live-share.txt	/*liveshare_providers*

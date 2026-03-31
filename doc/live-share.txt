@@ -3,15 +3,16 @@
 ===================================================================================
 CONTENTS                                                          *live-share.nvim*
 
-
-live-share.nvim is designed to create a "Live Share" server in Neovim, similar to
-the Visual Studio Code Live Share functionality. The main command defined is
-:LiveShareServer, which executes a Lua function to start the "Live Share". The
-plugin relies heavily on another plugin called jbyuki/instant.nvim and reverse tunneling services like serveo.net and localhost.run.
+live-share.nvim provides VS Code-like Live Share functionality for Neovim.
+Real-time collaborative editing is implemented natively (no external plugin
+dependencies). Traffic is encrypted end-to-end with AES-256-GCM; the session
+key travels only in the URL fragment and is never seen by tunnel servers.
+Reverse SSH tunneling services expose local sessions over the internet.
 
     1. Commands..........................................|liveshare_commands|
     2. Configuration.......................................|liveshare_config|
-    3. Custom Providers....................................|liveshare_custom|
+    3. Tunnel Providers..................................|liveshare_providers|
+    4. Custom Providers...................................|liveshare_custom|
 
 To find out more:
 https://github.com/azratul/live-share.nvim
@@ -20,57 +21,133 @@ https://github.com/azratul/live-share.nvim
 COMMANDS                                                       *liveshare_commands*
 
 
-:LiveShareServer [port]                                           *LiveShareServer*
-Starts the Live Share server on the specified port.
-    E.g. :LiveShareServer 9876
+:LiveShareHostStart [port]                                   *LiveShareHostStart*
+    Start hosting a Live Share session. Starts the local collaboration server
+    on [port] (defaults to `port_internal`) and spawns the configured tunnel.
+    When the public URL is ready it is copied to the clipboard automatically;
+    share it with guests. The URL includes the encrypted session key as a
+    fragment (`#key=...`) which is invisible to the tunnel server.
 
-:LiveShareJoin [url] [port]                                         *LiveShareJoin*
-Joins an existing Live Share session using the specified URL and port.
-    E.g. :LiveShareJoin abc.serveo.net 80
+    E.g.  :LiveShareHostStart
+          :LiveShareHostStart 9876
 
-Note: The port is optional for :LiveShareServer. For :LiveShareJoin, it's
-recommended not to change the port as serveo.net and localhost.run typically uses port 80 by default.
+:LiveShareJoin <url> [port]                                      *LiveShareJoin*
+    Join an existing Live Share session. <url> is the full URL that the host
+    shared (including the `#key=` fragment for encrypted sessions). [port]
+    overrides the port embedded in the URL when needed.
+
+    Accepted URL forms:
+      https://abc.lhr.life#key=...        (WebSocket via HTTPS tunnel)
+      tcp://host:PORT#key=...             (raw TCP tunnel, e.g. ngrok)
+      bore.pub:12345#key=...              (bare host:port, no scheme)
+
+    E.g.  :LiveShareJoin https://abc.lhr.life#key=AAAA...
+
+:LiveShareStop                                                  *LiveShareStop*
+    Stop the active Live Share session. Shuts down the local server or client
+    and kills the tunnel process. Runs automatically on VimLeavePre.
+
+:LiveShareFollow [peer_id]                                    *LiveShareFollow*
+    Follow a peer's cursor. Without an argument follows the host (peer 0).
+    Accepts tab-completion for connected peer IDs.
+
+    E.g.  :LiveShareFollow        " follow the host
+          :LiveShareFollow 2      " follow peer 2
+
+:LiveShareUnfollow                                          *LiveShareUnfollow*
+    Disable follow mode.
+
+:LiveShareWorkspace                                        *LiveShareWorkspace*
+    Open the remote workspace tree explorer. Guest only.
+
+:LiveSharePeers                                                *LiveSharePeers*
+    Show all session peers and their current cursor positions.
+
+:LiveShareOpen <path>                                          *LiveShareOpen*
+    Open a remote file from the host workspace into the current buffer.
+    Guest only. Accepts tab-completion for known workspace paths.
+
+    E.g.  :LiveShareOpen src/main.lua
+
+:LiveShareTerminal                                          *LiveShareTerminal*
+    Open a shared terminal. When run by the host a shell is spawned and shared
+    with all guests; guests connect automatically when the host opens one.
 
 ===================================================================================
-CONFIGURATION                                                    *liveshare_config*
+CONFIGURATION                                                  *liveshare_config*
 
-You can customize the behavior of live-share.nvim by configuring the following
-settings in your Neovim configuration file.
+Call `require("live-share").setup(opts)` in your Neovim config. All keys are
+optional; unset keys fall back to the defaults shown below.
 
 lua << EOF
 require("live-share").setup({
-  port_internal = 9876, -- The local port to be used for the live share connection
-  max_attempts = 10, -- Maximum number of attempts to read the URL from service(serveo or localtunnel), every 250 ms
-  service_url = "/tmp/service.url", -- Path to the file where the URL from service(serveo or localtunnel) will be stored
-  service = "localhost.run", -- Service to use, options are serveo.net or localhost.run
+  -- Local TCP port used by the collaboration server.
+  port_internal = 9876,
+
+  -- External port exposed by the tunnel (80 for HTTP-based services).
+  port = 80,
+
+  -- Maximum URL polling retries (one attempt every 250 ms).
+  max_attempts = 40,
+
+  -- Tunnel provider to use. Built-in options:
+  --   "serveo.net", "localhost.run", "nokey@localhost.run", "ngrok"
+  service = "nokey@localhost.run",
+
+  -- File where the tunnel process writes its public URL.
+  -- Defaults to a system temp file when nil.
+  service_url = nil,
+
+  -- Local bind address for the collaboration server.
+  ip_local = "127.0.0.1",
+
+  -- Display name shown to other peers. Falls back to vim.g.live_share_username.
+  username = nil,
+
+  -- Host workspace root shared with guests. Defaults to cwd.
+  workspace_root = nil,
+
+  -- Enable verbose debug logging.
+  debug = false,
 })
 EOF
 
 ===================================================================================
-CUSTOM PROVIDERS                                                 *liveshare_custom*
+TUNNEL PROVIDERS                                             *liveshare_providers*
 
-`live-share.nvim` now supports custom tunneling providers via the `register` API.
+The following providers are built in and can be selected via the `service` option:
 
-Example:
+  "nokey@localhost.run"   No-auth SSH tunnel via localhost.run (default)
+  "localhost.run"         Authenticated SSH tunnel via localhost.run
+  "serveo.net"            SSH tunnel via serveo.net
+  "ngrok"                 ngrok TCP tunnel (requires ngrok installed & authed)
+
+===================================================================================
+CUSTOM PROVIDERS                                               *liveshare_custom*
+
+Register additional tunneling backends with `provider.register(name, spec)`.
+`spec` must contain:
+
+  `command`   function(cfg, port_internal, service_url) → shell command string
+  `pattern`   Lua pattern that extracts the public URL from the command output
 
 lua << EOF
-  local provider = require("live-share.provider")
+local provider = require("live-share.provider")
 
-  provider.register("bore", {
-    command = function(_, port, outfile)
-      return string.format("bore local %d --to bore.pub > %s 2>/dev/null", port, outfile)
-    end,
-    pattern = "bore%.pub:%d+",
-  })
+provider.register("bore", {
+  command = function(_, port, outfile)
+    return string.format("bore local %d --to bore.pub > %s 2>/dev/null", port, outfile)
+  end,
+  pattern = "bore%.pub:%d+",
+})
 
-  require("live-share").setup({
-    service = "bore",
-    port_internal = 8765,
-    max_attempts = 40,
-  })
+require("live-share").setup({
+  service       = "bore",
+  port_internal = 8765,
+  max_attempts  = 40,
+})
 EOF
 
-This allows you to integrate any tunneling service that outputs a public URL, such as `bore`, `ngrok`, or custom SSH reverse tunnels.
-
+Any service that writes a public URL to stdout can be integrated this way.
 
 vim:ft=help:et:ts=2:sw=2:sts=2:norl
