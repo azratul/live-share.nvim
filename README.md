@@ -22,7 +22,7 @@
 
 This plugin brings VS Code-like Live Share functionality natively to Neovim: real-time collaborative editing, remote cursors and selections, shared terminals, and E2E encryption — with no external plugin dependencies.
 
-> Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions.
+> Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions. However, the underlying protocol is now publicly available, allowing developers of VS Code or any other editor to build their own client implementation and interoperate with the collaboration system. In that sense, while the plugin itself is Neovim-focused, the protocol is now editor-independent and open to broader ecosystem adoption.
 
 ### Removal of the instant.nvim dependency
 
