@@ -3,22 +3,38 @@
 -- Mode is determined by the caller:
 --   mode = "ws"  → WebSocket (HTTP tunnel providers)
 --   mode = "tcp" → raw TCP   (direct connections, ngrok tcp://)
+--
+-- Internally both modes are handled through a transport adapter:
+--   send_frame(payload) → framed bytes      (set at connect time)
+--   reader(chunk)       → { payload, ... }  (set at connect time)
+-- The upper layer only deals with encode/decode via protocol.lua.
 local M = {}
 
 local protocol  = require("live-share.collab.protocol")
 local websocket = require("live-share.collab.websocket")
+local tcp_trans = require("live-share.collab.transport.tcp")
 local log       = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
 local conn        = nil
 local on_message  = nil
 local session_key = nil
-local conn_mode   = "ws"  -- "ws" | "tcp"
+local send_frame  = nil  -- fn(payload) → framed bytes; set at connect time
 
 local function dbg(msg) log.dbg("client", msg) end
 
 function M.setup(cb)
   on_message = cb
+end
+
+local function dispatch_payloads(payloads)
+  for _, payload in ipairs(payloads) do
+    local msg = protocol.decode(payload, session_key)
+    if msg then
+      dbg("msg '" .. tostring(msg.t) .. "' received")
+      if on_message then on_message(msg) end
+    end
+  end
 end
 
 local function do_connect(ip, port, key, host, mode, attempt)
@@ -52,59 +68,42 @@ local function do_connect(ip, port, key, host, mode, attempt)
       return
     end
 
+    local function on_disconnect(read_err)
+      vim.schedule(function()
+        dbg("disconnected: " .. tostring(read_err))
+        if conn == tcp then conn = nil end
+        vim.api.nvim_out_write("live-share: disconnected from session\n")
+      end)
+      if not tcp:is_closing() then tcp:close() end
+    end
+
     if mode == "tcp" then
       dbg("TCP connected — raw TCP mode (encrypted=" .. tostring(key ~= nil) .. ")")
-      local raw_reader = protocol.new_raw_reader(session_key)
+      send_frame   = tcp_trans.frame
+      local reader = tcp_trans.new_reader()
 
       tcp:read_start(function(read_err, data)
-        if read_err or not data then
-          vim.schedule(function()
-            dbg("disconnected: " .. tostring(read_err))
-            if conn == tcp then conn = nil end
-            vim.api.nvim_out_write("live-share: disconnected from session\n")
-          end)
-          if not tcp:is_closing() then tcp:close() end
-          return
-        end
-        local msgs = raw_reader(data)
-        vim.schedule(function()
-          for _, msg in ipairs(msgs) do
-            if on_message then on_message(msg) end
-          end
-        end)
+        if read_err or not data then on_disconnect(read_err); return end
+        local payloads = reader(data)
+        vim.schedule(function() dispatch_payloads(payloads) end)
       end)
 
     else
       -- ── WebSocket mode ────────────────────────────────────────────────────
       dbg("TCP connected — sending WS upgrade request")
-      local ws_key     = websocket.make_client_key()
-      local state      = "handshaking"
-      local hs_buf     = ""
+      send_frame = function(payload) return websocket.encode_frame(payload, true) end
+      local ws_key      = websocket.make_client_key()
+      local state       = "handshaking"
+      local hs_buf      = ""
       local frame_reader = websocket.new_frame_reader()
 
       local function process_ws(data)
         local payloads = frame_reader(data)
-        for _, payload in ipairs(payloads) do
-          local msg = protocol.decode(payload, session_key)
-          if msg then
-            vim.schedule(function()
-              dbg("msg '" .. tostring(msg.t) .. "' received")
-              if on_message then on_message(msg) end
-            end)
-          end
-        end
+        vim.schedule(function() dispatch_payloads(payloads) end)
       end
 
       tcp:read_start(function(read_err, data)
-        if read_err or not data then
-          vim.schedule(function()
-            dbg("disconnected: " .. tostring(read_err))
-            if conn == tcp then conn = nil end
-            vim.api.nvim_out_write("live-share: disconnected from session\n")
-          end)
-          if not tcp:is_closing() then tcp:close() end
-          return
-        end
+        if read_err or not data then on_disconnect(read_err); return end
 
         if state == "handshaking" then
           hs_buf = hs_buf .. data
@@ -148,7 +147,6 @@ function M.connect(host, port, key, mode, attempt)
   attempt     = attempt or 0
   mode        = mode or "ws"
   session_key = key
-  conn_mode   = mode
 
   dbg("resolving " .. host)
   uv.getaddrinfo(host, nil, { socktype = "stream" }, function(err, res)
@@ -166,25 +164,17 @@ end
 
 function M.send(msg)
   if not (conn and not conn:is_closing()) then return end
+  if not send_frame then return end
 
-  if conn_mode == "tcp" then
-    local ok, frame = pcall(protocol.encode_raw, msg, session_key)
-    if ok then
-      conn:write(frame)
-    else
-      vim.schedule(function()
-        vim.api.nvim_err_writeln("live-share: encode error: " .. tostring(frame))
-      end)
-    end
+  local ok, result = pcall(function()
+    return send_frame(protocol.encode(msg, session_key))
+  end)
+  if ok then
+    conn:write(result)
   else
-    local ok, payload = pcall(protocol.encode, msg, session_key)
-    if ok then
-      conn:write(websocket.encode_frame(payload, true))  -- client→server: masked
-    else
-      vim.schedule(function()
-        vim.api.nvim_err_writeln("live-share: encode error: " .. tostring(payload))
-      end)
-    end
+    vim.schedule(function()
+      vim.api.nvim_err_writeln("live-share: encode error: " .. tostring(result))
+    end)
   end
 end
 
@@ -194,7 +184,7 @@ function M.stop()
     conn = nil
   end
   session_key = nil
-  conn_mode   = "ws"
+  send_frame  = nil
 end
 
 return M
