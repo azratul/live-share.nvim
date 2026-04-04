@@ -123,6 +123,7 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
               vim.api.nvim_err_writeln(
                 "live-share: WS handshake failed — server replied:\n"
                 .. headers:sub(1, 300))
+              if on_error then on_error() end
             end)
             if not tcp:is_closing() then tcp:close() end
             return
