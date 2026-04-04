@@ -357,7 +357,10 @@ function M.start(port)
 
   local ip = (config and config.ip_local) or "127.0.0.1"
   local p  = port or (config and config.port_internal) or 9876
-  server.start(ip, p, session.key)
+  if not server.start(ip, p, session.key) then
+    M.stop()
+    return false
+  end
 
   -- Attach to all currently open files.
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -422,6 +425,7 @@ function M.start(port)
 
   vim.api.nvim_out_write(
     "live-share: hosting '" .. vim.fn.fnamemodify(root, ":t") .. "' on port " .. p .. "\n")
+  return true
 end
 
 function M.stop()

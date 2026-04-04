@@ -20,7 +20,7 @@ function M.host_start(port)
   end
   local h = host()
   h.setup(M.config)
-  h.start(port)
+  if not h.start(port) then return end
   tunnel().start(port or M.config.port_internal)
 end
 

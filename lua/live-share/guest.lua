@@ -314,7 +314,9 @@ function M.connect(host_addr, port, key_b64, mode)
 
   require("live-share.shared_terminal").setup("guest", function(msg) tcp_client.send(msg) end)
   tcp_client.setup(on_message)
-  tcp_client.connect(host_addr, tonumber(port), session_key, mode or "ws")
+  tcp_client.connect(host_addr, tonumber(port), session_key, mode or "ws", nil, function()
+    M.stop()
+  end)
 end
 
 -- Request a specific file from the host workspace and open it.

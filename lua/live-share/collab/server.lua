@@ -44,10 +44,13 @@ function M.start(ip, port, key)
   srv = uv.new_tcp()
   local ok, err = srv:bind(ip, port)
   if not ok then
+    srv:close()
+    srv = nil
+    session_key = nil
     vim.schedule(function()
       vim.api.nvim_err_writeln("live-share: bind failed: " .. tostring(err))
     end)
-    return
+    return false
   end
 
   srv:listen(128, function(lerr)
@@ -171,6 +174,7 @@ function M.start(ip, port, key)
       if state == "tcp" then process(data); return end
     end)
   end)
+  return true
 end
 
 -- ── Approval API ──────────────────────────────────────────────────────────────

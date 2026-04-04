@@ -37,7 +37,7 @@ local function dispatch_payloads(payloads)
   end
 end
 
-local function do_connect(ip, port, key, host, mode, attempt)
+local function do_connect(ip, port, key, host, mode, attempt, on_error)
   dbg("connecting to " .. ip .. ":" .. tostring(port)
       .. " mode=" .. mode .. " (attempt " .. attempt .. ")")
 
@@ -56,13 +56,14 @@ local function do_connect(ip, port, key, host, mode, attempt)
         t:start(delay, 0, function()
           t:close()
           vim.schedule(function()
-            M.connect(host, port, key, mode, attempt + 1)
+            M.connect(host, port, key, mode, attempt + 1, on_error)
           end)
         end)
       else
         vim.schedule(function()
           vim.api.nvim_err_writeln(
             "live-share: could not connect to " .. host .. ":" .. tostring(port))
+          if on_error then on_error() end
         end)
       end
       return
@@ -143,7 +144,8 @@ local function do_connect(ip, port, key, host, mode, attempt)
 end
 
 -- mode: "ws" (default) or "tcp"
-function M.connect(host, port, key, mode, attempt)
+-- on_error: optional callback called when all retries are exhausted or DNS fails
+function M.connect(host, port, key, mode, attempt, on_error)
   attempt     = attempt or 0
   mode        = mode or "ws"
   session_key = key
@@ -154,11 +156,12 @@ function M.connect(host, port, key, mode, attempt)
       vim.schedule(function()
         vim.api.nvim_err_writeln(
           "live-share: could not resolve host '" .. host .. "': " .. tostring(err))
+        if on_error then on_error() end
       end)
       return
     end
     dbg("resolved " .. host .. " -> " .. res[1].addr)
-    do_connect(res[1].addr, port, key, host, mode, attempt)
+    do_connect(res[1].addr, port, key, host, mode, attempt, on_error)
   end)
 end
 
