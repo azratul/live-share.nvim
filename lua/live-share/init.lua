@@ -18,6 +18,11 @@ local defaults = {
   username       = nil,           -- display name; falls back to vim.g.live_share_username
   workspace_root = nil,           -- host workspace root; defaults to cwd
   debug          = false,
+  -- Explicit path to libcrypto, for systems where auto-detection fails.
+  -- Examples:
+  --   NixOS:  "/nix/store/xxxx-openssl-3.x/lib/libcrypto.so.3"
+  --   custom: "/usr/local/lib/libcrypto.so.3"
+  openssl_lib    = nil,
 }
 
 function M.setup(user_config)

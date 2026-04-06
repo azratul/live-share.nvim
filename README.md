@@ -36,7 +36,7 @@ Replacing `instant.nvim` required reimplementing the entire collaboration layer 
 ### Requirements
 
 - **Neovim 0.9+**
-- **OpenSSL** (optional but recommended — without it the session runs unencrypted)
+- **OpenSSL** (required — sessions will not start without it)
 - **Tunneling Binary**:
   - `serveo.net` / `localhost.run`: requires **SSH**
   - `ngrok`: requires the `ngrok` CLI ([download](https://ngrok.com/download)) authenticated once with:
@@ -145,6 +145,9 @@ require("live-share").setup({
   service        = "nokey@localhost.run", -- tunnel provider (see below)
   workspace_root = nil,                   -- defaults to cwd
   debug          = false,                 -- enable verbose logging
+  openssl_lib    = nil,                   -- explicit path to libcrypto, for systems where
+                                          -- auto-detection fails (NixOS, custom builds, etc.)
+                                          -- e.g. "/nix/store/xxxx-openssl-3.x/lib/libcrypto.so.3"
 })
 ```
 
@@ -172,7 +175,7 @@ require("live-share").setup({ service = "bore" })
 For a detailed technical specification of the communication layer, message schemas, and synchronization strategy, see [PROTOCOL.md](./PROTOCOL.md).
 
 - **Transport**: WebSocket over TCP for HTTP tunnel providers (serveo, localhost.run); raw length-prefixed TCP for direct connections and ngrok. Auto-detected on the first 4 bytes of each connection.
-- **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message when a key is present. Falls back to plaintext JSON if OpenSSL is unavailable.
+- **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message. Required — sessions will not start if OpenSSL is unavailable.
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
 - **Shared terminal**: PTY I/O streamed over the same encrypted WebSocket connection as all other session events.
 

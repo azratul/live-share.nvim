@@ -30,7 +30,11 @@ function M.check()
   if crypto.available then
     vim.health.ok("OpenSSL libcrypto found — AES-256-GCM encryption enabled")
   else
-    vim.health.error("OpenSSL libcrypto not found — encryption is required; install libssl (e.g. apt install libssl-dev)")
+    vim.health.error(
+      "OpenSSL libcrypto not found — encryption is required; "
+      .. "install libssl (e.g. apt install libssl-dev) or set openssl_lib to the full path "
+      .. "of libcrypto in your live-share.setup() call"
+    )
   end
 
   -- SSH (needed for tunnel providers: serveo.net, localhost.run)

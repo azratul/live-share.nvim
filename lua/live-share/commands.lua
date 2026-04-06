@@ -10,6 +10,7 @@ local function tunnel()  return require("live-share.tunnel")  end
 
 function M.setup(config)
   M.config = config
+  require("live-share.collab.crypto").setup(config)
 end
 
 -- :LiveShareHostStart [port]

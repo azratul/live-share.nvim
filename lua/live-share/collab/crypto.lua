@@ -26,6 +26,7 @@ end
 
 if not lib then
   M.available = false
+  -- M.setup(cfg) below can retry with an explicit path from user config.
   return M
 end
 
@@ -109,6 +110,17 @@ function M.decrypt(ciphertext_with_tag, key, nonce)
 
   if ok ~= 1 then return nil end
   return ffi.string(out, pt_len + outl[0])
+end
+
+-- Called from commands.setup() to retry loading with a user-supplied path.
+-- No-op if already available or if no path is given.
+function M.setup(cfg)
+  if M.available or not (cfg and cfg.openssl_lib) then return end
+  local ok, l = pcall(ffi.load, cfg.openssl_lib)
+  if ok then
+    lib = l
+    M.available = true
+  end
 end
 
 -- Base64url (RFC 4648 §5, no padding)
