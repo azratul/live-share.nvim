@@ -70,8 +70,11 @@ Every message is a JSON object with a type field `t`.
 | :--- | :--- | :--- |
 | `connect` | Guest | Initial request to join. |
 | `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, and `caps`. |
+| `rejected` | Host | Sent instead of `hello` when the connection is denied. |
 | `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
-| `hello_ack` | Guest | Final handshake step. Guest sends their `name`. |
+| `peers_snapshot` | Host | Sent after `workspace_info` if other guests are already connected. |
+| `open_files_snapshot` | Host | Sent after `workspace_info`. Full content of all currently open files. |
+| `hello_ack` | Guest | Final handshake step. Guest sends their `name` and `caps`. |
 
 #### `connect` (Guest → Host)
 ```json
@@ -118,6 +121,35 @@ Clients **should** skip rendering or UI for capabilities not listed in `caps`.
 
 The `caps` array lists what the guest client supports. Hosts **may** use this to suppress messages the guest cannot handle (e.g. skip `terminal_open` if `"terminal"` is absent).
 
+#### `rejected` (Host → Guest)
+Sent instead of `hello` when the host denies the connection.
+```json
+{ "t": "rejected", "reason": "Host denied the connection" }
+```
+The client must treat this as terminal — no reconnect should be attempted.
+
+#### `peers_snapshot` (Host → Guest)
+Sent after `hello` if other guests are already connected. Allows the new guest to populate its presence state immediately.
+```json
+{
+  "t": "peers_snapshot",
+  "peers": [
+    { "peer_id": 2, "name": "gojo", "active_path": "src/main.lua" }
+  ]
+}
+```
+
+#### `open_files_snapshot` (Host → Guest)
+Sent after `workspace_info`. Contains the full content of every file the host currently has open in the editor. Clients should create virtual buffers for each entry.
+```json
+{
+  "t": "open_files_snapshot",
+  "files": [
+    { "path": "src/main.lua", "lines": ["line 1", "line 2"] }
+  ]
+}
+```
+
 ### 5.2 Content Synchronization
 
 #### `patch` (Host ↔ Guest)
@@ -154,6 +186,30 @@ Broadcasts cursor position and visual selection.
 Indicates which file a user is currently viewing.
 ```json
 { "t": "focus", "path": "src/main.lua", "peer": 1, "name": "Bob" }
+```
+
+#### `open_file` (Host → Guest)
+The host opened a new file during an active session.
+```json
+{ "t": "open_file", "path": "src/new.lua", "lines": ["line 1", "line 2"] }
+```
+
+#### `close_file` (Host → Guest)
+The host closed a file during an active session. Clients should clean up the corresponding virtual buffer.
+```json
+{ "t": "close_file", "path": "src/old.lua" }
+```
+
+#### `save_file` (Host → Guest)
+The host saved a file to disk. Informational only — no buffer update is required.
+```json
+{ "t": "save_file", "path": "src/main.lua" }
+```
+
+#### `bye` (both directions)
+Signals an intentional disconnect. Guests send it before closing; the host broadcasts it when a guest disconnects so other peers can clean up their presence state.
+```json
+{ "t": "bye", "peer": 2, "name": "gojo" }
 ```
 
 ### 5.3 File Request / Resync
