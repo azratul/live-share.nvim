@@ -26,7 +26,7 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 
 ## Editor interoperability
 
-There is also early work on a VS Code client built around the `live-share.nvim` protocol: [open-pair](https://github.com/darkerthanblack2000/open-pair).
+There is also early work on a VS Code client built around the `azratul/live-share.nvim` protocol: [open-pair](https://github.com/darkerthanblack2000/open-pair).
 
 This project is currently a work in progress and has not been tested by this plugin's maintainer. Compatibility should therefore be considered experimental for now.
 
