@@ -107,6 +107,16 @@ end
 local function on_message(msg)
   -- ── hello ─────────────────────────────────────────────────────────────────
   if msg.t == "hello" then
+    local protocol = require("live-share.collab.protocol")
+    if msg.protocol_version and msg.protocol_version ~= protocol.VERSION then
+      vim.schedule(function()
+        vim.notify(
+          string.format(
+            "live-share: protocol version mismatch (host=%d, ours=%d) — behaviour may be undefined",
+            msg.protocol_version, protocol.VERSION),
+          vim.log.levels.WARN)
+      end)
+    end
     session.peer_id = msg.peer_id
     session.sid     = msg.sid
     guest_role      = msg.role or "rw"

@@ -49,20 +49,30 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 
 ---
 
-## 4. Message Types (JSON Schema)
+## 4. Protocol Versioning
+
+The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **1**.
+
+| Version | Change summary |
+| :--- | :--- |
+| 1 | Initial versioned release. Introduces this field. |
+
+---
+
+## 5. Message Types (JSON Schema)
 
 Every message is a JSON object with a type field `t`.
 
-### 4.1 Connection Handshake
+### 5.1 Connection Handshake
 
 | Type (`t`) | Sender | Description |
 | :--- | :--- | :--- |
 | `connect` | Guest | Initial request to join. |
-| `hello` | Host | Response after approval. Contains `peer_id`, `role` (`rw`/`ro`), and `host_name`. |
+| `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), and `host_name`. |
 | `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
 | `hello_ack` | Guest | Final handshake step. Guest sends their `name`. |
 
-### 4.2 Content Synchronization
+### 5.2 Content Synchronization
 
 #### `patch` (Host ↔ Guest)
 Sent when a buffer is modified.
@@ -100,7 +110,7 @@ Indicates which file a user is currently viewing.
 { "t": "focus", "path": "src/main.lua", "peer": 1, "name": "Bob" }
 ```
 
-### 4.3 Shared Terminal
+### 5.3 Shared Terminal
 
 #### `terminal_data` (Host → Guest)
 Raw PTY output from the host.
@@ -116,7 +126,7 @@ User keystrokes to be sent to the host's PTY.
 
 ---
 
-## 5. Implementation Notes for Clients
+## 6. Implementation Notes for Clients
 
 1.  **Read-only Mode:** If `role` is `ro` in the `hello` message, the client must disable all local editing and only apply incoming patches.
 2.  **Path Mapping:** All paths in the protocol are relative to the workspace root.

@@ -9,6 +9,9 @@
 --   Encrypted:  [ 12-byte nonce ][ ciphertext ][ 16-byte GCM tag ]
 local M = {}
 
+-- Increment when the message schema changes in a backward-incompatible way.
+M.VERSION = 1
+
 function M.encode(msg, key)
   local payload = vim.json.encode(msg)
   if not key then return payload end

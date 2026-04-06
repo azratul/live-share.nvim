@@ -18,6 +18,10 @@ function M.host_start(port)
     vim.notify("live-share: session already active — run :LiveShareStop first", vim.log.levels.WARN)
     return
   end
+  if not require("live-share.collab.crypto").available then
+    vim.notify("live-share: OpenSSL is not available — encryption is required to start a session", vim.log.levels.ERROR)
+    return
+  end
   local h = host()
   h.setup(M.config)
   if not h.start(port) then return end
@@ -30,9 +34,17 @@ function M.join(url, port)
     vim.notify("live-share: session already active — run :LiveShareStop first", vim.log.levels.WARN)
     return
   end
+  if not require("live-share.collab.crypto").available then
+    vim.notify("live-share: OpenSSL is not available — encryption is required to join a session", vim.log.levels.ERROR)
+    return
+  end
   port = port or M.config.port
 
   local key_b64 = url:match("#key=([A-Za-z0-9_%-]+)")
+  if not key_b64 then
+    vim.notify("live-share: no encryption key found in URL (#key=...) — refusing to connect without encryption", vim.log.levels.ERROR)
+    return
+  end
   url = url:gsub("#.*$", "")
 
   local mode

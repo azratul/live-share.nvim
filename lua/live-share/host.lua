@@ -177,11 +177,12 @@ local function on_message(msg, from_peer)
             server.set_role(from_peer, ro and "ro" or "rw")
 
             server.send(from_peer, {
-              t         = "hello",
-              sid       = session.id,
-              peer_id   = from_peer,
-              host_name = get_username(),
-              role      = ro and "ro" or "rw",
+              t                = "hello",
+              protocol_version = require("live-share.collab.protocol").VERSION,
+              sid              = session.id,
+              peer_id          = from_peer,
+              host_name        = get_username(),
+              role             = ro and "ro" or "rw",
             })
 
             -- Workspace file list (flat).

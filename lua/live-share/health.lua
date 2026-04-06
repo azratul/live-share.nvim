@@ -22,7 +22,7 @@ function M.check()
   if ffi_ok then
     vim.health.ok("LuaJIT FFI available")
   else
-    vim.health.warn("LuaJIT FFI not available — sessions will run without encryption")
+    vim.health.error("LuaJIT FFI not available — AES-256-GCM encryption is required; install a LuaJIT-based Neovim build")
   end
 
   -- OpenSSL libcrypto (needed for AES-GCM encryption)
@@ -30,7 +30,7 @@ function M.check()
   if crypto.available then
     vim.health.ok("OpenSSL libcrypto found — AES-256-GCM encryption enabled")
   else
-    vim.health.warn("OpenSSL libcrypto not found — sessions will run without encryption")
+    vim.health.error("OpenSSL libcrypto not found — encryption is required; install libssl (e.g. apt install libssl-dev)")
   end
 
   -- SSH (needed for tunnel providers: serveo.net, localhost.run)
