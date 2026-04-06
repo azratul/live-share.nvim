@@ -69,7 +69,7 @@ Every message is a JSON object with a type field `t`.
 | Type (`t`) | Sender | Description |
 | :--- | :--- | :--- |
 | `connect` | Guest | Initial request to join. |
-| `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), and `host_name`. |
+| `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, and `caps`. |
 | `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
 | `hello_ack` | Guest | Final handshake step. Guest sends their `name`. |
 
