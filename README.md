@@ -24,6 +24,14 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 
 > Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions. However, the underlying protocol is now publicly available, allowing developers of VS Code or any other editor to build their own client implementation and interoperate with the collaboration system. In that sense, while the plugin itself is Neovim-focused, the protocol is now editor-independent and open to broader ecosystem adoption.
 
+## Editor interoperability
+
+There is also early work on a VS Code client built around the `live-share.nvim` protocol: [open-pair](https://github.com/darkerthanblack2000/open-pair).
+
+This project is currently a work in progress and has not been tested by this plugin's maintainer. Compatibility should therefore be considered experimental for now.
+
+If you're interested in cross-editor collaboration between Neovim and VS Code, keep an eye on `open-pair` as it evolves.
+
 ### Removal of the instant.nvim dependency
 
 Previous versions relied on [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) as the collaborative editing engine. That dependency was removed for two reasons:
