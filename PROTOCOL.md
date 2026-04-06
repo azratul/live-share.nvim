@@ -1,4 +1,4 @@
-# Live Share Protocol Specification (v2.0.0)
+# Live-Share.nvim Protocol Specification (v2.0.0)
 
 This document describes the communication protocol used by `live-share.nvim`. It is designed to allow developers to implement compatible plugins for other editors.
 
