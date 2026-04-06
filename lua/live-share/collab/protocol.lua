@@ -10,7 +10,7 @@
 local M = {}
 
 -- Increment when the message schema changes in a backward-incompatible way.
-M.VERSION = 3
+M.VERSION = 1
 
 function M.encode(msg, key)
   local payload = vim.json.encode(msg)
