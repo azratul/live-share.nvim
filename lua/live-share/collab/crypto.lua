@@ -13,7 +13,13 @@ end
 
 -- Try common library names across Linux, macOS, Windows
 local lib
-for _, name in ipairs({ "crypto", "libcrypto.so.3", "libcrypto.so.1.1", "libcrypto.dylib" }) do
+for _, name in ipairs({
+  "crypto",
+  "libcrypto.so.3",
+  "libcrypto.so.1.1",
+  "libcrypto.dylib",
+  "/run/current-system/sw/share/nix-ld/lib/libcrypto.so",
+}) do
   local ok, l = pcall(ffi.load, name)
   if ok then lib = l; break end
 end
