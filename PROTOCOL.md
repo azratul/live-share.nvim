@@ -72,6 +72,37 @@ Every message is a JSON object with a type field `t`.
 | `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
 | `hello_ack` | Guest | Final handshake step. Guest sends their `name`. |
 
+#### `connect` (Guest → Host)
+```json
+{ "t": "connect" }
+```
+
+#### `hello` (Host → Guest)
+```json
+{
+  "t": "hello",
+  "protocol_version": 1,
+  "peer_id": 1,
+  "sid": "a1b2c3d4",
+  "role": "rw",         // "rw" (read/write) or "ro" (read-only)
+  "host_name": "alice"
+}
+```
+
+#### `workspace_info` (Host → Guest)
+```json
+{
+  "t": "workspace_info",
+  "root_name": "my-project",
+  "files": ["src/main.lua", "README.md", "lua/plugin/init.lua"]
+}
+```
+
+#### `hello_ack` (Guest → Host)
+```json
+{ "t": "hello_ack", "name": "bob" }
+```
+
 ### 5.2 Content Synchronization
 
 #### `patch` (Host ↔ Guest)
