@@ -51,7 +51,7 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 
 ## 4. Protocol Versioning
 
-The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **2**.
+The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **1**.
 
 | Version | Change summary |
 | :--- | :--- |
