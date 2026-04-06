@@ -76,9 +76,14 @@ function M.start(ip, port, key)
     local function dispatch(msg)
       -- Drop messages from unapproved peers (they're still in pending).
       if not clients[peer_id] then return end
-      -- Enforce read-only: silently drop patch messages from ro peers.
+      -- Enforce read-only: reject patch messages from ro peers.
       if msg.t == "patch" and peer_roles[peer_id] == "ro" then
-        dbg("peer " .. peer_id .. " is read-only — dropping patch")
+        dbg("peer " .. peer_id .. " is read-only — rejecting patch")
+        M.send(peer_id, {
+          t       = "error",
+          code    = "unauthorized",
+          message = "read-only guests cannot send patches",
+        })
         return
       end
       vim.schedule(function()

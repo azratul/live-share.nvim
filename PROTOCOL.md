@@ -51,11 +51,12 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 
 ## 4. Protocol Versioning
 
-The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **1**.
+The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **2**.
 
 | Version | Change summary |
 | :--- | :--- |
 | 1 | Initial versioned release. Introduces this field. |
+| 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 
 ---
 
@@ -84,10 +85,22 @@ Every message is a JSON object with a type field `t`.
   "protocol_version": 1,
   "peer_id": 1,
   "sid": "a1b2c3d4",
-  "role": "rw",         // "rw" (read/write) or "ro" (read-only)
-  "host_name": "alice"
+  "role": "rw",
+  "host_name": "alice",
+  "caps": ["workspace", "terminal", "cursor", "follow"]
 }
 ```
+
+Defined capability tokens:
+
+| Token | Meaning |
+| :--- | :--- |
+| `workspace` | Multi-buffer workspace: file list, `open_file` / `close_file` notifications |
+| `terminal` | Shared PTY terminal (`terminal_open` / `terminal_data` / `terminal_close`) |
+| `cursor` | Cursor and visual-selection sync (`cursor` messages) |
+| `follow` | Follow-mode: host broadcasts `focus` events |
+
+Clients **should** skip rendering or UI for capabilities not listed in `caps`.
 
 #### `workspace_info` (Host → Guest)
 ```json
@@ -100,8 +113,10 @@ Every message is a JSON object with a type field `t`.
 
 #### `hello_ack` (Guest → Host)
 ```json
-{ "t": "hello_ack", "name": "bob" }
+{ "t": "hello_ack", "name": "bob", "caps": ["cursor", "follow"] }
 ```
+
+The `caps` array lists what the guest client supports. Hosts **may** use this to suppress messages the guest cannot handle (e.g. skip `terminal_open` if `"terminal"` is absent).
 
 ### 5.2 Content Synchronization
 
@@ -141,12 +156,64 @@ Indicates which file a user is currently viewing.
 { "t": "focus", "path": "src/main.lua", "peer": 1, "name": "Bob" }
 ```
 
-### 5.3 Shared Terminal
+### 5.3 File Request / Resync
+
+Guests may request a full snapshot of any workspace file at any time — on initial open, after a detected desync, or when joining late.
+
+#### `file_request` (Guest → Host)
+```json
+{ "t": "file_request", "path": "src/main.lua" }
+```
+
+#### `file_response` (Host → Guest)
+```json
+{
+  "t": "file_response",
+  "path": "src/main.lua",
+  "lines": ["line 1", "line 2"],
+  "readonly": false
+}
+```
+
+If the file does not exist in the workspace the host replies with an `error` message (`code: "file_not_found"`) instead.
+
+**Recommended resync flow:** if a guest detects an inconsistent document state (e.g. a patch references a line beyond the current buffer length), it should send `file_request` for the affected path. The host will reply with the authoritative full snapshot, which the guest applies unconditionally to reset state.
+
+### 5.4 Errors
+
+#### `error` (Host → Guest)
+Sent when the host rejects or cannot fulfil a request.
+```json
+{ "t": "error", "code": "file_not_found", "message": "file not found in workspace: src/foo.lua" }
+```
+
+Defined error codes:
+
+| Code | Trigger |
+| :--- | :--- |
+| `unauthorized` | A read-only guest sent a `patch` message |
+| `file_not_found` | A `file_request` path does not exist in the workspace |
+
+Clients **must** display the `message` field to the user and **should not** treat unknown codes as fatal.
+
+### 5.5 Shared Terminal
+
+#### `terminal_open` (Host → Guest)
+Notifies guests that a shared terminal session has started.
+```json
+{ "t": "terminal_open", "term_id": "main", "name": "bash" }
+```
 
 #### `terminal_data` (Host → Guest)
 Raw PTY output from the host.
 ```json
 { "t": "terminal_data", "term_id": "main", "data": "SGVsbG8gV29ybGQh..." } // Base64 encoded
+```
+
+#### `terminal_close` (Host → Guest)
+Notifies guests that the shared terminal has ended.
+```json
+{ "t": "terminal_close", "term_id": "main" }
 ```
 
 #### `terminal_input` (Guest → Host)

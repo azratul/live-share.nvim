@@ -183,6 +183,7 @@ local function on_message(msg, from_peer)
               peer_id          = from_peer,
               host_name        = get_username(),
               role             = ro and "ro" or "rw",
+              caps             = { "workspace", "terminal", "cursor", "follow" },
             })
 
             -- Workspace file list (flat).
@@ -221,6 +222,9 @@ local function on_message(msg, from_peer)
   elseif msg.t == "hello_ack" then
     local label = (msg.name and msg.name ~= "") and msg.name or ("guest " .. from_peer)
     presence.update_peer(from_peer, msg.name)
+    if msg.caps then
+      log.dbg("host", "guest " .. from_peer .. " caps: " .. vim.inspect(msg.caps))
+    end
     vim.schedule(function()
       vim.api.nvim_out_write("live-share: " .. label .. " joined\n")
     end)
@@ -230,21 +234,28 @@ local function on_message(msg, from_peer)
     local path = msg.path
     if not path then return end
 
-    local lines, readonly
+    local lines
     local t = tracked[path]
     if t and vim.api.nvim_buf_is_valid(t.buf_id) then
-      lines    = vim.api.nvim_buf_get_lines(t.buf_id, 0, -1, false)
-      readonly = false
+      lines = vim.api.nvim_buf_get_lines(t.buf_id, 0, -1, false)
     else
-      lines    = workspace.read_file(path)
-      readonly = false
+      lines = workspace.read_file(path)
+    end
+
+    if not lines then
+      server.send(from_peer, {
+        t       = "error",
+        code    = "file_not_found",
+        message = "file not found in workspace: " .. path,
+      })
+      return
     end
 
     server.send(from_peer, {
       t        = "file_response",
       path     = path,
-      lines    = lines or {},
-      readonly = readonly,
+      lines    = lines,
+      readonly = false,
     })
 
   -- ── patch ─────────────────────────────────────────────────────────────────

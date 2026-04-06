@@ -120,9 +120,10 @@ local function on_message(msg)
     session.peer_id = msg.peer_id
     session.sid     = msg.sid
     guest_role      = msg.role or "rw"
+    session.host_caps = msg.caps or {}
     -- Register the host in presence so they appear in :LiveSharePeers.
     presence.update_peer(0, msg.host_name or "host")
-    tcp_client.send({ t = "hello_ack", name = get_username() })
+    tcp_client.send({ t = "hello_ack", name = get_username(), caps = { "cursor", "follow" } })
     vim.schedule(function()
       local role_label = guest_role == "ro" and " [read-only]" or ""
       vim.api.nvim_out_write(
@@ -131,6 +132,15 @@ local function on_message(msg)
       if guest_role == "ro" then
         vim.notify("live-share: you joined as read-only — editing is disabled", vim.log.levels.WARN)
       end
+    end)
+
+  -- ── error ─────────────────────────────────────────────────────────────────
+  elseif msg.t == "error" then
+    vim.schedule(function()
+      vim.notify(
+        "live-share: host error [" .. (msg.code or "unknown") .. "] "
+        .. (msg.message or ""),
+        vim.log.levels.ERROR)
     end)
 
   -- ── rejected ─────────────────────────────────────────────────────────────
