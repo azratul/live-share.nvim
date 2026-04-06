@@ -57,6 +57,7 @@ The `hello` message carries a `protocol_version` integer field. Clients **should
 | :--- | :--- |
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
+| 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
 
 ---
 
@@ -69,7 +70,7 @@ Every message is a JSON object with a type field `t`.
 | Type (`t`) | Sender | Description |
 | :--- | :--- | :--- |
 | `connect` | Guest | Initial request to join. |
-| `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, and `caps`. |
+| `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, `required_caps`, and `optional_caps`. |
 | `rejected` | Host | Sent instead of `hello` when the connection is denied. |
 | `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
 | `peers_snapshot` | Host | Sent after `workspace_info` if other guests are already connected. |
@@ -90,20 +91,21 @@ Every message is a JSON object with a type field `t`.
   "sid": "a1b2c3d4",
   "role": "rw",
   "host_name": "alice",
-  "caps": ["workspace", "terminal", "cursor", "follow"]
+  "required_caps": ["workspace"],
+  "optional_caps": ["terminal", "cursor", "follow"]
 }
 ```
 
+`required_caps` lists features the client **must** support to participate. If the client does not support one or more of them, it must disconnect immediately with a clear error. `optional_caps` lists features the client may skip — the session will still work without them.
+
 Defined capability tokens:
 
-| Token | Meaning |
-| :--- | :--- |
-| `workspace` | Multi-buffer workspace: file list, `open_file` / `close_file` notifications |
-| `terminal` | Shared PTY terminal (`terminal_open` / `terminal_data` / `terminal_close`) |
-| `cursor` | Cursor and visual-selection sync (`cursor` messages) |
-| `follow` | Follow-mode: host broadcasts `focus` events |
-
-Clients **should** skip rendering or UI for capabilities not listed in `caps`.
+| Token | Required / Optional | Meaning |
+| :--- | :--- | :--- |
+| `workspace` | Required | Multi-buffer workspace: file list, `open_file` / `close_file` notifications |
+| `terminal` | Optional | Shared PTY terminal (`terminal_open` / `terminal_data` / `terminal_close`) |
+| `cursor` | Optional | Cursor and visual-selection sync (`cursor` messages) |
+| `follow` | Optional | Follow-mode: host broadcasts `focus` events |
 
 #### `workspace_info` (Host → Guest)
 ```json
@@ -116,10 +118,10 @@ Clients **should** skip rendering or UI for capabilities not listed in `caps`.
 
 #### `hello_ack` (Guest → Host)
 ```json
-{ "t": "hello_ack", "name": "bob", "caps": ["cursor", "follow"] }
+{ "t": "hello_ack", "name": "bob", "caps": ["workspace", "terminal", "cursor", "follow"] }
 ```
 
-The `caps` array lists what the guest client supports. Hosts **may** use this to suppress messages the guest cannot handle (e.g. skip `terminal_open` if `"terminal"` is absent).
+The `caps` array lists all capability tokens the guest client supports. Hosts **may** use this to suppress messages the guest cannot handle (e.g. skip `terminal_open` if `"terminal"` is absent).
 
 #### `rejected` (Host → Guest)
 Sent instead of `hello` when the host denies the connection.
@@ -218,8 +220,10 @@ Guests may request a full snapshot of any workspace file at any time — on init
 
 #### `file_request` (Guest → Host)
 ```json
-{ "t": "file_request", "path": "src/main.lua" }
+{ "t": "file_request", "path": "src/main.lua", "req_id": 1 }
 ```
+
+`req_id` is an optional integer chosen by the client. When present, the host echoes it back in the corresponding `file_response` or `error`, allowing clients to correlate concurrent or retried requests.
 
 #### `file_response` (Host → Guest)
 ```json
@@ -227,11 +231,12 @@ Guests may request a full snapshot of any workspace file at any time — on init
   "t": "file_response",
   "path": "src/main.lua",
   "lines": ["line 1", "line 2"],
-  "readonly": false
+  "readonly": false,
+  "req_id": 1
 }
 ```
 
-If the file does not exist in the workspace the host replies with an `error` message (`code: "file_not_found"`) instead.
+If the file does not exist in the workspace the host replies with an `error` message (`code: "file_not_found"`, same `req_id`) instead.
 
 **Recommended resync flow:** if a guest detects an inconsistent document state (e.g. a patch references a line beyond the current buffer length), it should send `file_request` for the affected path. The host will reply with the authoritative full snapshot, which the guest applies unconditionally to reset state.
 
@@ -240,8 +245,10 @@ If the file does not exist in the workspace the host replies with an `error` mes
 #### `error` (Host → Guest)
 Sent when the host rejects or cannot fulfil a request.
 ```json
-{ "t": "error", "code": "file_not_found", "message": "file not found in workspace: src/foo.lua" }
+{ "t": "error", "code": "file_not_found", "message": "file not found in workspace: src/foo.lua", "req_id": 1 }
 ```
+
+`req_id` is echoed from the originating request when present.
 
 Defined error codes:
 

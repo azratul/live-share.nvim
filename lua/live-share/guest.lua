@@ -120,7 +120,8 @@ local function on_message(msg)
     session.peer_id = msg.peer_id
     session.sid     = msg.sid
     guest_role      = msg.role or "rw"
-    session.host_caps = msg.caps or {}
+    session.host_required_caps = msg.required_caps or {}
+    session.host_optional_caps = msg.optional_caps or {}
     -- Register the host in presence so they appear in :LiveSharePeers.
     presence.update_peer(0, msg.host_name or "host")
     tcp_client.send({ t = "hello_ack", name = get_username(), caps = { "cursor", "follow" } })

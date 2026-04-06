@@ -183,7 +183,8 @@ local function on_message(msg, from_peer)
               peer_id          = from_peer,
               host_name        = get_username(),
               role             = ro and "ro" or "rw",
-              caps             = { "workspace", "terminal", "cursor", "follow" },
+              required_caps    = { "workspace" },
+              optional_caps    = { "terminal", "cursor", "follow" },
             })
 
             -- Workspace file list (flat).
@@ -247,6 +248,7 @@ local function on_message(msg, from_peer)
         t       = "error",
         code    = "file_not_found",
         message = "file not found in workspace: " .. path,
+        req_id  = msg.req_id,
       })
       return
     end
@@ -256,6 +258,7 @@ local function on_message(msg, from_peer)
       path     = path,
       lines    = lines,
       readonly = false,
+      req_id   = msg.req_id,
     })
 
   -- ── patch ─────────────────────────────────────────────────────────────────
