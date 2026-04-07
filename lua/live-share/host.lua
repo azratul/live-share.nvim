@@ -7,7 +7,7 @@
 --   For files not open in Neovim the patch is applied directly to disk.
 local M = {}
 
-local server    = require("live-share.collab.server")
+local connection = require("live-share.collab.connection")
 local workspace = require("live-share.workspace")
 local presence  = require("live-share.presence")
 local follow    = require("live-share.follow")
@@ -17,6 +17,7 @@ local log       = require("live-share.collab.log")
 local uv        = vim.uv or vim.loop
 
 local config   = nil
+local conn     = nil
 local seq      = 0
 
 -- tracked[path] = { buf_id, applying }  — Neovim buffers currently open by host
@@ -68,7 +69,7 @@ local function attach_buffer(b)
       if firstline == lastline and new_lastline == firstline then return end
       seq = seq + 1
       local lines = vim.api.nvim_buf_get_lines(buf, firstline, new_lastline, false)
-      server.broadcast({
+      conn:broadcast({
         t     = "patch",
         path  = path,
         seq   = seq,
@@ -120,7 +121,7 @@ local function attach_buffer(b)
           cmsg.sel_lnum = sel.sl; cmsg.sel_col = sel.sc
           cmsg.sel_end_lnum = sel.el; cmsg.sel_end_col = sel.ec
         end
-        server.broadcast(cmsg)
+        conn:broadcast(cmsg)
       end))
     end,
   })
@@ -134,7 +135,7 @@ local function attach_buffer(b)
       local old = vim.v.event.old_mode
       if old == "v" or old == "V" or old == "\22" then
         local pos = vim.api.nvim_win_get_cursor(0)
-        server.broadcast({
+        conn:broadcast({
           t    = "cursor",
           path = path,
           peer = 0,
@@ -161,7 +162,7 @@ local function on_message(msg, from_peer)
       { prompt = "Guest #" .. from_peer .. " wants to join — allow?" },
       function(choice)
         if choice ~= "Allow" then
-          server.reject(from_peer, { t = "rejected", reason = "Host denied the connection" })
+          conn:reject(from_peer, { t = "rejected", reason = "Host denied the connection" })
           vim.api.nvim_out_write("live-share: denied guest #" .. from_peer .. "\n")
           return
         end
@@ -173,10 +174,10 @@ local function on_message(msg, from_peer)
           function(role_choice)
             -- Treat dismiss (nil) as Read/Write to avoid orphaned pending entries.
             local ro = (role_choice == "Read only")
-            server.approve(from_peer)
-            server.set_role(from_peer, ro and "ro" or "rw")
+            conn:approve(from_peer)
+            conn:set_role(from_peer, ro and "ro" or "rw")
 
-            server.send(from_peer, {
+            conn:send(from_peer, {
               t                = "hello",
               protocol_version = require("live-share.collab.protocol").VERSION,
               sid              = session.id,
@@ -189,7 +190,7 @@ local function on_message(msg, from_peer)
 
             -- Workspace file list (flat).
             local files = workspace.scan()
-            server.send(from_peer, {
+            conn:send(from_peer, {
               t         = "workspace_info",
               root_name = vim.fn.fnamemodify(workspace.get_root() or ".", ":t"),
               files     = files,
@@ -206,13 +207,13 @@ local function on_message(msg, from_peer)
               end
             end
             if #open_list > 0 then
-              server.send(from_peer, { t = "open_files_snapshot", files = open_list })
+              conn:send(from_peer, { t = "open_files_snapshot", files = open_list })
             end
 
             -- Snapshot of currently connected peers so the new guest sees them immediately.
             local peer_list = presence.get_all()
             if #peer_list > 0 then
-              server.send(from_peer, { t = "peers_snapshot", peers = peer_list })
+              conn:send(from_peer, { t = "peers_snapshot", peers = peer_list })
             end
           end
         )
@@ -244,7 +245,7 @@ local function on_message(msg, from_peer)
     end
 
     if not lines then
-      server.send(from_peer, {
+      conn:send(from_peer, {
         t       = "error",
         code    = "file_not_found",
         message = "file not found in workspace: " .. path,
@@ -253,7 +254,7 @@ local function on_message(msg, from_peer)
       return
     end
 
-    server.send(from_peer, {
+    conn:send(from_peer, {
       t        = "file_response",
       path     = path,
       lines    = lines,
@@ -284,7 +285,7 @@ local function on_message(msg, from_peer)
       workspace.apply_patch_to_disk(path, msg.lnum, msg.count, msg.lines)
     end
 
-    server.broadcast(stamped, from_peer)
+    conn:broadcast(stamped, from_peer)
 
   -- ── cursor ────────────────────────────────────────────────────────────────
   elseif msg.t == "cursor" then
@@ -297,7 +298,7 @@ local function on_message(msg, from_peer)
       } or nil
       presence.update_cursor(entry.buf_id, from_peer, msg.lnum, msg.col, msg.name, msg.path, sel)
     end
-    server.broadcast({
+    conn:broadcast({
       t    = "cursor", path = msg.path, peer = from_peer,
       lnum = msg.lnum, col  = msg.col,  name = msg.name,
       sel_lnum = msg.sel_lnum, sel_col = msg.sel_col,
@@ -310,14 +311,14 @@ local function on_message(msg, from_peer)
     presence.update_focus(from_peer, msg.path, msg.name)
     presence.update_peer(from_peer, label)
     follow.maybe_follow(msg.path, nil, nil, from_peer)
-    server.broadcast({
+    conn:broadcast({
       t = "focus", path = msg.path, peer = from_peer, name = msg.name,
     }, from_peer)
 
   -- ── bye ───────────────────────────────────────────────────────────────────
   elseif msg.t == "bye" then
     presence.remove_peer(from_peer)
-    server.broadcast({ t = "bye", peer = from_peer, name = msg.name }, from_peer)
+    conn:broadcast({ t = "bye", peer = from_peer, name = msg.name }, from_peer)
     vim.schedule(function()
       local label = msg.name or ("guest " .. from_peer)
       vim.api.nvim_out_write("live-share: " .. label .. " left\n")
@@ -354,8 +355,8 @@ function M.start(port)
     vim.notify("live-share: OpenSSL not found — session runs WITHOUT encryption", vim.log.levels.WARN)
   end
 
-  require("live-share.shared_terminal").setup("host", function(msg) server.broadcast(msg) end)
-  server.setup(on_message)
+  conn = connection.new_listener({ key = session.key, on_msg = on_message })
+  require("live-share.shared_terminal").setup("host", function(msg) conn:broadcast(msg) end)
 
   -- Follow mode: when host follows a guest, switch to their active tracked buffer.
   follow.setup(function(path, lnum, col)
@@ -372,7 +373,7 @@ function M.start(port)
 
   local ip = (config and config.ip_local) or "127.0.0.1"
   local p  = port or (config and config.port_internal) or 9876
-  if not server.start(ip, p, session.key) then
+  if not conn:listen(ip, p) then
     M.stop()
     return false
   end
@@ -391,7 +392,7 @@ function M.start(port)
         local path = attach_buffer(b)
         if path then
           local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-          server.broadcast({ t = "open_file", path = path, lines = lines })
+          conn:broadcast({ t = "open_file", path = path, lines = lines })
         end
       end)
     end,
@@ -406,7 +407,7 @@ function M.start(port)
           local b = ev.buf
           presence.clear_buf(b)
           tracked[path] = nil
-          server.broadcast({ t = "close_file", path = path })
+          conn:broadcast({ t = "close_file", path = path })
           dbg("unshared: " .. path)
           break
         end
@@ -421,7 +422,7 @@ function M.start(port)
       vim.schedule(function()
         local path = make_path(vim.api.nvim_buf_get_name(ev.buf))
         if tracked[path] then
-          server.broadcast({ t = "focus", path = path, peer = 0, name = get_username() })
+          conn:broadcast({ t = "focus", path = path, peer = 0, name = get_username() })
         end
       end)
     end,
@@ -433,7 +434,7 @@ function M.start(port)
     callback = function(ev)
       local path = make_path(vim.api.nvim_buf_get_name(ev.buf))
       if tracked[path] then
-        server.broadcast({ t = "save_file", path = path })
+        conn:broadcast({ t = "save_file", path = path })
       end
     end,
   })
@@ -454,7 +455,7 @@ function M.stop()
   presence.clear_all()
   follow.reset()
   require("live-share.shared_terminal").stop()
-  server.stop()
+  if conn then conn:stop(); conn = nil end
   tracked = {}
   seq     = 0
   workspace.set_root(nil)

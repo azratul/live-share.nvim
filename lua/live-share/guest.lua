@@ -2,7 +2,7 @@
 -- workspace view, and handles all inbound protocol events.
 local M = {}
 
-local tcp_client      = require("live-share.collab.client")
+local connection      = require("live-share.collab.connection")
 local buffer_registry = require("live-share.buffer_registry")
 local presence        = require("live-share.presence")
 local follow          = require("live-share.follow")
@@ -12,6 +12,7 @@ local log             = require("live-share.collab.log")
 local uv              = vim.uv or vim.loop
 
 local config          = nil
+local conn            = nil
 local guest_role      = nil   -- "rw" | "ro" — set from the hello message
 local workspace_files = {}    -- flat list of paths in the remote workspace
 local workspace_root_name = nil
@@ -62,7 +63,7 @@ local function register_cursor_emit(b, path)
           cmsg.sel_lnum = sel.sl; cmsg.sel_col = sel.sc
           cmsg.sel_end_lnum = sel.el; cmsg.sel_end_col = sel.ec
         end
-        tcp_client.send(cmsg)
+        conn:send(cmsg)
       end))
     end,
   })
@@ -74,7 +75,7 @@ local function register_cursor_emit(b, path)
       local old = vim.v.event.old_mode
       if old == "v" or old == "V" or old == "\22" then
         local pos = vim.api.nvim_win_get_cursor(0)
-        tcp_client.send({
+        conn:send({
           t    = "cursor",
           path = path,
           lnum = pos[1] - 1,
@@ -92,7 +93,7 @@ local function register_focus_emit(b, path)
     group  = cursor_aug,
     buffer = b,
     callback = function()
-      tcp_client.send({ t = "focus", path = path, name = get_username() })
+      conn:send({ t = "focus", path = path, name = get_username() })
     end,
   })
 end
@@ -124,7 +125,7 @@ local function on_message(msg)
     session.host_optional_caps = msg.optional_caps or {}
     -- Register the host in presence so they appear in :LiveSharePeers.
     presence.update_peer(0, msg.host_name or "host")
-    tcp_client.send({ t = "hello_ack", name = get_username(), caps = { "cursor", "follow" } })
+    conn:send({ t = "hello_ack", name = get_username(), caps = { "cursor", "follow" } })
     vim.schedule(function()
       local role_label = guest_role == "ro" and " [read-only]" or ""
       vim.api.nvim_out_write(
@@ -314,7 +315,7 @@ function M.connect(host_addr, port, key_b64, mode)
 
   -- Wire up local-edit → server callback (read-only guests never send patches).
   buffer_registry.setup(function(_, patch)
-    if guest_role ~= "ro" then tcp_client.send(patch) end
+    if guest_role ~= "ro" then conn:send(patch) end
   end)
 
   -- Follow mode callback: switch to the host's active buffer.
@@ -322,7 +323,7 @@ function M.connect(host_addr, port, key_b64, mode)
     local b = buffer_registry.get_buf(path)
     if not b then
       -- We don't have the file yet — request it and switch when it arrives.
-      tcp_client.send({ t = "file_request", path = path })
+      conn:send({ t = "file_request", path = path })
     else
       vim.schedule(function()
         vim.api.nvim_set_current_buf(b)
@@ -333,9 +334,9 @@ function M.connect(host_addr, port, key_b64, mode)
     end
   end)
 
-  require("live-share.shared_terminal").setup("guest", function(msg) tcp_client.send(msg) end)
-  tcp_client.setup(on_message)
-  tcp_client.connect(host_addr, tonumber(port), session_key, mode or "ws", nil, function()
+  conn = connection.new_connector({ key = session_key, mode = mode or "ws", on_msg = on_message })
+  require("live-share.shared_terminal").setup("guest", function(msg) conn:send(msg) end)
+  conn:connect(host_addr, port, function()
     M.stop()
   end)
 end
@@ -352,7 +353,7 @@ function M.request_file(path)
     vim.api.nvim_set_current_buf(b)
     return
   end
-  tcp_client.send({ t = "file_request", path = path })
+  conn:send({ t = "file_request", path = path })
 end
 
 function M.get_role()
@@ -378,7 +379,7 @@ function M.stop()
   follow.reset()
   require("live-share.shared_terminal").stop()
   buffer_registry.close_all()
-  tcp_client.stop()
+  if conn then conn:stop(); conn = nil end
   workspace_files     = {}
   workspace_root_name = nil
   guest_role          = nil
