@@ -2,7 +2,7 @@
 --
 -- Encodes/decodes a message table to/from a binary payload.
 -- Transport framing (length-prefix, WebSocket frames) is handled by the
--- transport adapters in transport/tcp.lua and websocket.lua.
+-- transport adapters in transport/tcp.lua and transport/ws.lua.
 --
 -- Payload format:
 --   Plaintext:  JSON string

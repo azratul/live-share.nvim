@@ -11,8 +11,8 @@
 local M = {}
 
 local protocol  = require("live-share.collab.protocol")
-local websocket = require("live-share.collab.websocket")
 local tcp_trans = require("live-share.collab.transport.tcp")
+local ws_trans  = require("live-share.collab.transport.ws")
 local log       = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
@@ -92,11 +92,11 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
     else
       -- ── WebSocket mode ────────────────────────────────────────────────────
       dbg("TCP connected — sending WS upgrade request")
-      send_frame = function(payload) return websocket.encode_frame(payload, true) end
-      local ws_key      = websocket.make_client_key()
-      local state       = "handshaking"
-      local hs_buf      = ""
-      local frame_reader = websocket.new_frame_reader()
+      send_frame = ws_trans.frame_client
+      local upgrade_req, _ws_key = ws_trans.client_upgrade(host)
+      local state        = "handshaking"
+      local hs_buf       = ""
+      local frame_reader = ws_trans.new_reader()
 
       local function process_ws(data)
         local payloads = frame_reader(data)
@@ -108,21 +108,14 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
 
         if state == "handshaking" then
           hs_buf = hs_buf .. data
-          local hend = hs_buf:find("\r\n\r\n", 1, true)
-          if not hend then return end
+          local ok, rest, err_msg = ws_trans.complete_client_handshake(hs_buf)
+          if ok == nil then return end  -- need more data
 
-          local headers = hs_buf:sub(1, hend + 3)
-          local rest    = hs_buf:sub(hend + 4)
           hs_buf = nil
 
-          dbg("WS handshake response: "
-              .. headers:gsub("\r\n", " | "):sub(1, 300))
-
-          if not headers:find("101") then
+          if not ok then
             vim.schedule(function()
-              vim.api.nvim_err_writeln(
-                "live-share: WS handshake failed — server replied:\n"
-                .. headers:sub(1, 300))
+              vim.api.nvim_err_writeln("live-share: " .. (err_msg or "WS handshake failed"))
               if on_error then on_error() end
             end)
             if not tcp:is_closing() then tcp:close() end
@@ -139,7 +132,7 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
       end)
 
       -- Send upgrade request after setting up the read handler
-      tcp:write(websocket.client_request(host, ws_key))
+      tcp:write(upgrade_req)
     end
   end)
 end

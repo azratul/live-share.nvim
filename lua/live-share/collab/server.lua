@@ -16,8 +16,8 @@
 local M = {}
 
 local protocol  = require("live-share.collab.protocol")
-local websocket = require("live-share.collab.websocket")
 local tcp_trans = require("live-share.collab.transport.tcp")
+local ws_trans  = require("live-share.collab.transport.ws")
 local log       = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
@@ -30,7 +30,7 @@ local on_message  = nil
 local session_key = nil
 
 -- Module-level framers so broadcast can use them as stable cache keys.
-local function ws_framer(payload)  return websocket.encode_frame(payload, false) end
+local function ws_framer(payload)  return ws_trans.frame(payload) end
 local function tcp_framer(payload) return tcp_trans.frame(payload) end
 
 local function dbg(msg) log.dbg("server", msg) end
@@ -112,25 +112,16 @@ function M.start(ip, port, key)
     end
 
     local function complete_ws_handshake(initial_buf)
-      local hend = initial_buf:find("\r\n\r\n", 1, true)
-      if not hend then return false end  -- need more data
+      local response, rest, err_msg = ws_trans.server_handshake_response(initial_buf)
+      if response == nil then return false end  -- need more data
 
-      local headers = initial_buf:sub(1, hend + 3)
-      local rest    = initial_buf:sub(hend + 4)
-
-      dbg("peer " .. peer_id .. " headers: "
-          .. headers:gsub("\r\n", " | "):sub(1, 300))
-
-      -- HTTP headers are case-insensitive (RFC 7230); serveo sends "Sec-Websocket-Key"
-      local ws_key = headers:match("[Ss]ec%-[Ww]eb[Ss]ocket%-[Kk]ey:%s*([^\r\n]+)")
-      if ws_key then ws_key = ws_key:match("^(.-)%s*$") end
-      if not ws_key then
-        dbg("peer " .. peer_id .. " — Sec-WebSocket-Key missing; closing")
+      if response == false then
+        dbg("peer " .. peer_id .. " — " .. (err_msg or "bad WS request") .. "; closing")
         if not conn:is_closing() then conn:close() end
         return true  -- done (with error)
       end
 
-      conn:write(websocket.server_response(ws_key))
+      conn:write(response)
       state = "ws"
       pending[peer_id] = { handle = conn, framer = ws_framer, mode = "ws" }
       dbg("peer " .. peer_id .. " WS handshake done — awaiting host approval")
@@ -153,7 +144,7 @@ function M.start(ip, port, key)
         if #buf < 4 then return end
         if buf:sub(1, 4) == "GET " then
           state  = "ws_hs"
-          reader = websocket.new_frame_reader()
+          reader = ws_trans.new_reader()
           dbg("peer " .. peer_id .. " → WebSocket mode")
           -- fall through to ws_hs handling below
         else
