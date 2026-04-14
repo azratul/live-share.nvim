@@ -80,6 +80,9 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
 
     if mode == "tcp" then
       dbg("TCP connected — raw TCP mode (encrypted=" .. tostring(key ~= nil) .. ")")
+      vim.schedule(function()
+        vim.notify("live-share: connected (tunnel relay)", vim.log.levels.INFO)
+      end)
       send_frame   = tcp_trans.frame
       local reader = tcp_trans.new_reader()
 
@@ -124,6 +127,9 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
 
           dbg("WS handshake complete (encrypted=" .. tostring(session_key ~= nil) .. ")")
           state = "connected"
+          vim.schedule(function()
+            vim.notify("live-share: connected (tunnel relay)", vim.log.levels.INFO)
+          end)
           if #rest > 0 then process_ws(rest) end
           return
         end

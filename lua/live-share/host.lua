@@ -355,7 +355,31 @@ function M.start(port)
     vim.notify("live-share: OpenSSL not found — session runs WITHOUT encryption", vim.log.levels.WARN)
   end
 
-  conn = connection.new_listener({ key = session.key, on_msg = on_message })
+  local p
+  if config and config.transport == "punch" then
+    local ok_conn, punch_listener = pcall(connection.new_punch_listener, {
+      key    = session.key,
+      on_msg = on_message,
+      stun   = config.stun,
+    })
+    if not ok_conn then
+      vim.notify("live-share: punch transport unavailable: " .. tostring(punch_listener), vim.log.levels.ERROR)
+      M.stop()
+      return false
+    end
+    conn = punch_listener
+    conn:listen()
+    p = conn.signaling_port
+  else
+    conn = connection.new_listener({ key = session.key, on_msg = on_message })
+    local ip = (config and config.ip_local) or "127.0.0.1"
+    p = port or (config and config.port_internal) or 9876
+    if not conn:listen(ip, p) then
+      M.stop()
+      return false
+    end
+  end
+
   require("live-share.shared_terminal").setup("host", function(msg) conn:broadcast(msg) end)
 
   -- Follow mode: when host follows a guest, switch to their active tracked buffer.
@@ -370,13 +394,6 @@ function M.start(port)
       end)
     end
   end)
-
-  local ip = (config and config.ip_local) or "127.0.0.1"
-  local p  = port or (config and config.port_internal) or 9876
-  if not conn:listen(ip, p) then
-    M.stop()
-    return false
-  end
 
   -- Attach to all currently open files.
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
@@ -439,6 +456,8 @@ function M.start(port)
     end,
   })
 
+  -- Status message.
+  p = p or (conn and conn.signaling_port) or "0"
   vim.api.nvim_out_write(
     "live-share: hosting '" .. vim.fn.fnamemodify(root, ":t") .. "' on port " .. p .. "\n")
   return true
@@ -471,6 +490,11 @@ end
 function M.get_key_fragment()
   if not session.key then return "" end
   return "#key=" .. crypto.b64url_encode(session.key)
+end
+
+-- Returns the signaling server port when using the punch transport, else nil.
+function M.get_signaling_port()
+  return conn and conn.signaling_port
 end
 
 function M.random_sid()

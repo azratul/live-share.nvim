@@ -8,10 +8,10 @@
 	<img src="https://dotfyle.com/plugins/azratul/live-share.nvim/shield?style=flat-square" />
 </a>
 
-✨ v2.0.0 – Native Collaboration Engine
+✨ v2.1.0 – P2P Transport via punch.lua
 
 > ⚠️ **Heads up:** If the latest commit causes any issues, please [open an issue](https://github.com/azratul/live-share.nvim/issues).
-> Meanwhile, you can use the last stable version by checking out the [`v1.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v1.1.0) tag:
+> Meanwhile, you can use the last stable version by checking out the [`v1.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v2.0.0) tag:
 
 ```lua
 -- lazy.nvim
@@ -52,8 +52,31 @@ Replacing `instant.nvim` required reimplementing the entire collaboration layer 
     ngrok config add-authtoken <your_token>
     ```
     The free plan works fine.
+  - `bore`: requires the [`bore`](https://github.com/ekzhang/bore) CLI
+- **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library:
+  ```bash
+  luarocks install punch
+  ```
 
 - **Tested Environments**: Linux and OpenBSD. macOS and Windows (GitBash only) are untested.
+
+## What's new in v2.1.0
+
+### P2P transport via punch.lua
+A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel between host and guest using NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel is used only during the ~5-second signaling phase; all collaborative traffic flows over a direct encrypted UDP channel afterwards, bypassing the tunnel server entirely.
+
+The P2P channel is encrypted with AES-256-GCM using the same session key that travels in the URL fragment.
+
+To use P2P transport, install punch and configure a TCP-level tunnel (bore or ngrok — HTTP reverse proxies like serveo/localhost.run are not compatible with the signaling phase):
+
+```lua
+require("live-share").setup({
+  transport = "punch",
+  service   = "bore",   -- or "ngrok"
+  stun      = { "stun.l.google.com:19302", "stun1.l.google.com:19302" },
+  username  = "your-name",
+})
+```
 
 ## What's new in v2.0.0
 
@@ -77,9 +100,12 @@ The host is prompted to approve or deny each incoming connection and can assign 
 
 ## Installation
 
-No external plugin dependencies required.
+No external plugin dependencies required for the default `ws` transport.
+If you want to use the `punch` P2P transport, the `punch` Lua library is required (see options below).
 
 ### lazy.nvim
+
+Basic installation (no P2P transport):
 
 ```lua
 {
@@ -87,6 +113,43 @@ No external plugin dependencies required.
   config = function()
     require("live-share").setup({
       username = "your-name",
+    })
+  end
+}
+```
+
+**Option A** — auto-install punch via a build hook (runs once on install/update):
+
+```lua
+{
+  "azratul/live-share.nvim",
+  build = "luarocks install punch",
+  config = function()
+    require("live-share").setup({
+      transport = "punch",
+      service   = "bore",   -- or "ngrok"
+      username  = "your-name",
+    })
+  end
+}
+```
+
+**Option B** — auto-install punch via [luarocks.nvim](https://github.com/vhyrro/luarocks.nvim):
+
+```lua
+{
+  "vhyrro/luarocks.nvim",
+  priority = 1000,
+  opts = { rocks = { "punch" } },
+},
+{
+  "azratul/live-share.nvim",
+  dependencies = { "vhyrro/luarocks.nvim" },
+  config = function()
+    require("live-share").setup({
+      transport = "punch",
+      service   = "bore",   -- or "ngrok"
+      username  = "your-name",
     })
   end
 }
@@ -146,7 +209,7 @@ All settings are optional.
 ```lua
 require("live-share").setup({
   username       = "your-name",           -- displayed to other participants
-  port_internal  = 9876,                  -- local TCP port for the collab server
+  port_internal  = 9876,                  -- local TCP port for the collab server (ws/tcp transport)
   port           = 80,                    -- external tunnel port
   max_attempts   = 40,                    -- URL polling retries (× 250 ms = 10 s)
   service_url    = "/tmp/service.url",    -- temp file where the tunnel writes its URL
@@ -156,6 +219,9 @@ require("live-share").setup({
   openssl_lib    = nil,                   -- explicit path to libcrypto, for systems where
                                           -- auto-detection fails (NixOS, custom builds, etc.)
                                           -- e.g. "/nix/store/xxxx-openssl-3.x/lib/libcrypto.so.3"
+  -- P2P transport (requires: luarocks install punch)
+  transport      = "ws",                  -- "ws" (default) or "punch" (direct P2P UDP)
+  stun           = "stun.l.google.com:19302", -- STUN server; accepts a string or table of strings
 })
 ```
 
@@ -169,7 +235,7 @@ Custom providers can be registered via the provider API:
 require("live-share.provider").register("bore", {
   command = function(_, port, service_url)
     return string.format(
-      "bore local %d --to bore.pub > %s 2>/dev/null",
+      "bore local %d --to bore.pub > %s 2>&1",
       port, service_url)
   end,
   pattern = "bore%.pub:%d+",
@@ -182,10 +248,12 @@ require("live-share").setup({ service = "bore" })
 
 For a detailed technical specification of the communication layer, message schemas, and synchronization strategy, see [PROTOCOL.md](./PROTOCOL.md).
 
-- **Transport**: WebSocket over TCP for HTTP tunnel providers (serveo, localhost.run); raw length-prefixed TCP for direct connections and ngrok. Auto-detected on the first 4 bytes of each connection.
-- **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message. Required — sessions will not start if OpenSSL is unavailable.
+- **Transport**: Two modes available:
+  - `ws` (default): WebSocket over TCP. Auto-detects WebSocket vs. raw TCP from the first 4 bytes — WebSocket for HTTP tunnel providers (serveo, localhost.run), raw length-prefixed TCP for direct connections and ngrok.
+  - `punch`: Direct P2P UDP via NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel exposes only the HTTP signaling server (~5 s); all subsequent traffic flows peer-to-peer. Requires a TCP-level tunnel (bore, ngrok).
+- **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message. For `ws`, encryption is applied at the protocol layer; for `punch`, the channel layer handles it. Required — sessions will not start if OpenSSL is unavailable.
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
-- **Shared terminal**: PTY I/O streamed over the same encrypted WebSocket connection as all other session events.
+- **Shared terminal**: PTY I/O streamed over the same encrypted connection as all other session events.
 
 ## Contributing
 

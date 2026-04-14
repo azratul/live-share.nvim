@@ -334,11 +334,35 @@ function M.connect(host_addr, port, key_b64, mode)
     end
   end)
 
-  conn = connection.new_connector({ key = session_key, mode = mode or "ws", on_msg = on_message })
-  require("live-share.shared_terminal").setup("guest", function(msg) conn:send(msg) end)
-  conn:connect(host_addr, port, function()
-    M.stop()
-  end)
+  if mode == "punch" then
+    local ok_conn, punch_connector = pcall(connection.new_punch_connector, {
+      key    = session_key,
+      on_msg = on_message,
+      stun   = (config and config.stun),
+    })
+    if not ok_conn then
+      vim.notify("live-share: punch transport unavailable: " .. tostring(punch_connector), vim.log.levels.ERROR)
+      session.role = nil
+      return
+    end
+    conn = punch_connector
+    -- host_addr is the signaling server URL (e.g. "https://tunnel.host/...")
+    require("live-share.shared_terminal").setup("guest", function(msg) conn:send(msg) end)
+    conn:connect(host_addr, nil, function(err)
+      if err then
+        vim.schedule(function()
+          vim.notify("live-share: connection failed: " .. tostring(err), vim.log.levels.ERROR)
+        end)
+      end
+      M.stop()
+    end)
+  else
+    conn = connection.new_connector({ key = session_key, mode = mode or "ws", on_msg = on_message })
+    require("live-share.shared_terminal").setup("guest", function(msg) conn:send(msg) end)
+    conn:connect(host_addr, port, function()
+      M.stop()
+    end)
+  end
 end
 
 -- Request a specific file from the host workspace and open it.

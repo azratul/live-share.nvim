@@ -26,7 +26,17 @@ function M.host_start(port)
   local h = host()
   h.setup(M.config)
   if not h.start(port) then return end
-  tunnel().start(port or M.config.port_internal)
+
+  if M.config.transport == "punch" then
+    local sig_port = h.get_signaling_port()
+    if not sig_port then
+      vim.notify("live-share: punch transport started but signaling port is unavailable", vim.log.levels.ERROR)
+      return
+    end
+    tunnel().start(sig_port, { url_prefix = "punch+" })
+  else
+    tunnel().start(port or M.config.port_internal)
+  end
 end
 
 -- :LiveShareJoin <url> [port]
@@ -49,7 +59,23 @@ function M.join(url, port)
   url = url:gsub("#.*$", "")
 
   local mode
-  if url:match("^tcp://") then
+  if url:match("^punch%+") then
+    -- Punch (P2P) transport: "punch+http://tunnel-host:port" or "punch+host:port"
+    url  = url:gsub("^punch%+", "")
+    -- TCP tunnel (e.g. ngrok): transparent relay — the punch signaling client
+    -- speaks plain HTTP, so convert tcp:// to http://.
+    if url:match("^tcp://") then
+      local h, p = url:match("^tcp://([^:]+):(%d+)")
+      if h and p then url = "http://" .. h .. ":" .. p end
+    -- If it doesn't have a scheme, prepend http:// (signaling server is HTTP).
+    elseif not url:match("^https?://") then
+      url = "http://" .. url
+    end
+    -- Note: HTTPS URLs from SSH-based tunnels (localhost.run, serveo) are NOT
+    -- compatible with punch because the signaling client only speaks plain HTTP.
+    -- Use service = "ngrok" (TCP) when transport = "punch".
+    mode = "punch"
+  elseif url:match("^tcp://") then
     local h, p = url:match("^tcp://([^:]+):(%d+)")
     url  = h
     port = tonumber(p)
@@ -62,8 +88,6 @@ function M.join(url, port)
     local h, p = url:match("^([^:]+):(%d+)")
     url  = h
     port = tonumber(p)
-    mode = "ws"
-  else
     mode = "ws"
   end
 

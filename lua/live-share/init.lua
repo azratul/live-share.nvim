@@ -23,6 +23,11 @@ local defaults = {
   --   NixOS:  "/nix/store/xxxx-openssl-3.x/lib/libcrypto.so.3"
   --   custom: "/usr/local/lib/libcrypto.so.3"
   openssl_lib    = nil,
+  -- Transport backend: "ws" (WebSocket over TCP tunnel, default) or "punch"
+  -- (direct P2P UDP via punch.lua — tunnel used only for the handshake phase).
+  transport      = "ws",
+  -- STUN server used when transport = "punch".
+  stun           = "stun.l.google.com:19302",
 }
 
 function M.setup(user_config)

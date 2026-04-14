@@ -46,7 +46,13 @@ function M.setup(config)
   })
 end
 
-function M.start(port)
+-- start(port [, opts])
+--   port           — internal port to expose
+--   opts.url_prefix — string prepended to the public URL before the key fragment
+--                     (e.g. "punch+" for punch transport)
+function M.start(port, opts)
+  opts = opts or {}
+  local url_prefix = opts.url_prefix or ""
   local service = M.config.service
   local sconfig = services[service]
 
@@ -107,11 +113,10 @@ function M.start(port)
       if result and result ~= "" then
         local url = result:match(sconfig.pattern)
         if url then
-          -- Append encryption key fragment when available (invisible to tunnel server)
+          -- Prepend transport prefix (e.g. "punch+") and append encryption key fragment.
           local ok_host, h = pcall(require, "live-share.host")
-          if ok_host then
-            url = url .. h.get_key_fragment()
-          end
+          local key_frag = (ok_host and h.get_key_fragment()) or ""
+          url = url_prefix .. url .. key_frag
 
           if vim.fn.has("clipboard") == 1 then
             local clipboard_ok = pcall(vim.fn.setreg, "+", url)

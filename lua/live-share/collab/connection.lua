@@ -35,6 +35,11 @@ local M = {}
 local server = require("live-share.collab.server")
 local client = require("live-share.collab.client")
 
+-- punch_conn is loaded lazily to avoid errors when punch.lua is not installed.
+local function punch_conn()
+  return require("live-share.collab.punch_conn")
+end
+
 -- ── Listener ─────────────────────────────────────────────────────────────────
 
 function M.new_listener(opts)
@@ -93,6 +98,25 @@ function M.new_connector(opts)
   end
 
   return self
+end
+
+-- ── Punch Listener ───────────────────────────────────────────────────────────
+
+-- new_punch_listener(opts)
+-- Same as new_listener but uses direct P2P UDP via punch.lua.
+-- The returned object additionally exposes:
+--   conn.signaling_port — port of the local HTTP signaling server
+function M.new_punch_listener(opts)
+  return punch_conn().new_punch_listener(opts)
+end
+
+-- ── Punch Connector ───────────────────────────────────────────────────────────
+
+-- new_punch_connector(opts)
+-- Same as new_connector but uses direct P2P UDP via punch.lua.
+-- connect(signaling_url, _, on_error) — port arg is unused for punch.
+function M.new_punch_connector(opts)
+  return punch_conn().new_punch_connector(opts)
 end
 
 return M
