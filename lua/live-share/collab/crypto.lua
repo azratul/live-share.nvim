@@ -96,7 +96,7 @@ end
 
 -- Returns plaintext, or nil if authentication fails.
 function M.decrypt(ciphertext_with_tag, key, nonce)
-  if #ciphertext_with_tag <= TAG_LEN then
+  if #ciphertext_with_tag < TAG_LEN then
     return nil
   end
   local ct_len = #ciphertext_with_tag - TAG_LEN
