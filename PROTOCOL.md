@@ -133,6 +133,8 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 
 ## 4. Protocol Versioning
 
+> **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.2.0` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
+
 The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **3**.
 
 | Version | Change summary |
