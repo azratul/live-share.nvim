@@ -100,4 +100,71 @@ describe("protocol", function()
       assert.are_not.equal(p1, p2)
     end)
   end)
+
+  describe("protocol fixtures", function()
+    local fixtures_dir = "tests/fixtures"
+
+    local function load_fixture(name)
+      local path = fixtures_dir .. "/" .. name
+      local f = io.open(path, "r")
+      if not f then return nil, "cannot open " .. path end
+      local content = f:read("*a")
+      f:close()
+      local ok, data = pcall(vim.json.decode, content)
+      if not ok then return nil, "invalid JSON in " .. path end
+      return data
+    end
+
+    it("handshake fixture is a valid hello message", function()
+      local msg, err = load_fixture("handshake.json")
+      assert.is_nil(err, err)
+      assert.equals("hello", msg.t)
+      assert.is_number(msg.peer_id)
+      assert.is_string(msg.sid)
+    end)
+
+    it("patch fixture has required fields", function()
+      local msg, err = load_fixture("patch.json")
+      assert.is_nil(err, err)
+      assert.equals("patch", msg.t)
+      assert.is_string(msg.path)
+      assert.is_number(msg.lnum)
+      assert.is_number(msg.count)
+      assert.is_table(msg.lines)
+    end)
+
+    it("cursor fixture has required fields", function()
+      local msg, err = load_fixture("cursor.json")
+      assert.is_nil(err, err)
+      assert.equals("cursor", msg.t)
+      assert.is_string(msg.path)
+      assert.is_number(msg.lnum)
+      assert.is_number(msg.col)
+    end)
+
+    it("terminal_data fixture has required fields", function()
+      local msg, err = load_fixture("terminal_data.json")
+      assert.is_nil(err, err)
+      assert.equals("terminal_data", msg.t)
+      assert.is_number(msg.term_id)
+      assert.is_string(msg.data)
+    end)
+
+    it("bye fixture has required fields", function()
+      local msg, err = load_fixture("bye.json")
+      assert.is_nil(err, err)
+      assert.equals("bye", msg.t)
+      assert.is_number(msg.peer)
+    end)
+
+    it("each fixture round-trips through encode/decode (plaintext)", function()
+      local fixtures = { "handshake.json", "patch.json", "cursor.json", "terminal_data.json", "bye.json" }
+      for _, name in ipairs(fixtures) do
+        local msg, err = load_fixture(name)
+        assert.is_nil(err, err)
+        local decoded = protocol.decode(protocol.encode(msg, nil), nil)
+        assert.are.same(msg, decoded, "round-trip failed for " .. name)
+      end
+    end)
+  end)
 end)
