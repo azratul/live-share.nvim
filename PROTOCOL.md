@@ -46,14 +46,49 @@ Guests strip the `punch+` prefix, normalize `tcp://` to `http://`, and treat the
 
 The host runs a lightweight HTTP signaling server (port chosen by the OS; exposed via the tunnel). The handshake proceeds as follows:
 
-1. **Host** gathers local ICE candidates and publishes a *host description* to the signaling server (`set_host_desc`).
+1. **Host** gathers local ICE candidates (local + STUN-reflexive via `stun.l.google.com:19302` by default) and publishes a *host description* to the signaling server.
 2. **Guest** sends `GET /` to the signaling server (long-poll, up to 30 s) to fetch the host description and a `slot` identifier.
 3. **Guest** concurrently gathers its own local candidates.
-4. **Guest** sends `POST /guest/<slot>` with its own description (`post_guest`).
-5. **Host** receives the guest description and both peers attempt UDP hole-punching.
+4. **Guest** sends `POST /guest/<slot>` with its own description.
+5. **Host** receives the guest description; both peers attempt UDP hole-punching by sending keepalive probes to all candidate pairs.
 6. Once the UDP channel reaches state `open`, collaborative traffic begins using the same message types as WS/TCP (§5).
 
 The signaling server accepts only one pending guest at a time. While guest N is connecting, the host immediately prepares a new session slot for guest N+1 (star topology — each guest has an independent UDP socket).
+
+#### 1.3.2.1 Signaling HTTP API
+
+All requests and responses use JSON bodies (`Content-Type: application/json`).
+
+**`GET /`** — Fetch the host description (long-poll).
+
+The server holds the connection open until the host description is available, then responds:
+```json
+{ "slot": 1, "desc": { "candidates": ["192.168.1.10:54321", "1.2.3.4:54321"], "key": "<base64>" } }
+```
+
+- `slot` — integer identifier for this guest session; must be included in the subsequent POST.
+- `desc.candidates` — array of `"ip:port"` strings (local and STUN-reflexive UDP endpoints).
+- `desc.key` — base64-encoded ephemeral Diffie-Hellman public key material used by the punch library to authenticate the channel. Implementors using the `punch` library can treat this as opaque.
+
+If the host description is not published within the long-poll timeout, the server returns `408 Request Timeout`. The guest should surface a connection error and not retry automatically.
+
+**`POST /guest/<slot>`** — Post the guest description.
+
+Request body uses the same structure as the host description:
+```json
+{ "candidates": ["10.0.0.5:60000", "5.6.7.8:60000"], "key": "<base64>" }
+```
+
+On success the server returns `200 OK` with an empty body. If `<slot>` does not match an active pending session the server returns `404 Not Found`; the guest should abort.
+
+#### 1.3.2.2 Hole-Punching and Failure
+
+After descriptions are exchanged, both peers simultaneously probe all candidate pairs. The pair that receives a valid response first becomes the active path; remaining probes are abandoned.
+
+**Failure cases:**
+- If no candidate pair succeeds within ~10 s, both peers should report a connection error to the user. There is no automatic fallback to WS/TCP; the user must reshare the URL.
+- If the STUN server is unreachable, only local-network candidates are gathered. The connection will still work on the same LAN but will fail across NATs.
+- Symmetric NAT (common on CGNAT and some corporate networks) may prevent hole-punching. The `punch` library does not support TURN relay; direct connectivity is required.
 
 #### 1.3.3 Encryption
 
@@ -98,7 +133,7 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 
 ## 4. Protocol Versioning
 
-The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **1**.
+The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **3**.
 
 | Version | Change summary |
 | :--- | :--- |
@@ -347,3 +382,45 @@ User keystrokes to be sent to the host's PTY.
     - Bare `host:port` (no scheme) → WebSocket transport (§1.1).
 6.  **Punch — signaling timeout:** `fetch_host` should long-poll for at least 30 s to handle slow tunnel startup. If the host description is not available after the timeout, surface a connection error to the user without retrying automatically.
 7.  **Punch — encryption:** Do not apply the §2.2 nonce/ciphertext wrapping when using the Punch transport. Encryption is handled at the channel level by the punch library. Payload bytes are raw JSON.
+
+---
+
+## 7. Edge Cases and Normative Behavior
+
+### 7.1 Concurrent Patches and `seq` Ordering
+
+The host is the sole authority for `seq` assignment. When two guests submit patches concurrently:
+
+1. The host receives both patches in some order (TCP/WS) or by arrival order (UDP).
+2. The host applies the first patch to its buffer, stamps it with the next `seq`, and broadcasts it to all peers **including the originating guest**.
+3. The host then applies the second patch (which may now reference stale line numbers), stamps it with `seq+1`, and broadcasts it.
+4. Guests **must** apply patches in `seq` order. A patch with `seq` N+1 arriving before N should be buffered until N is applied, then N+1 applied immediately after.
+5. Guests **must not** assume their own patch was applied as submitted. They must wait for the host's broadcast (which carries the authoritative `seq`) before updating their local state.
+
+If a guest detects a gap in `seq` (e.g., receives seq 5 then 7 without 6), it should issue a `file_request` for the affected path to force a full resync.
+
+### 7.2 Out-of-Range Patch
+
+If a `patch` references a `lnum` beyond the current buffer length (indicating a missed update or desync), the guest **must not** apply the patch. Instead it must immediately send `file_request` for the affected path. The host will reply with the authoritative full snapshot, which the guest applies unconditionally to reset state.
+
+### 7.3 Abrupt Disconnect (No `bye`)
+
+When a TCP/WS connection closes without a `bye` message (e.g., network drop, process kill):
+
+- The **host** detects the closed socket, removes the peer from its registry, and broadcasts `{ "t": "bye", "peer": <id>, "name": "<name>" }` to all remaining guests on their behalf.
+- **Guests** detecting a broken connection (read error, EOF) should treat it as equivalent to receiving `bye` from the host and clean up all presence state (cursors, extmarks).
+- In Punch transport, the `close` event on the UDP session serves as the disconnect signal; the host synthesizes and broadcasts `bye` identically.
+
+After an abrupt disconnect the guest **should not** attempt automatic reconnection. The session URL is single-use; the user must rejoin manually.
+
+### 7.4 Capability Negotiation Edge Cases
+
+**Missing required cap:** If `hello.required_caps` contains a token the guest does not implement, the guest **must** send `bye` immediately (before `hello_ack`) and display an error such as:
+```
+live-share: this session requires capability "workspace" which is not supported by this client.
+```
+No collaborative traffic should be exchanged.
+
+**Missing optional cap:** The session continues normally. The host **should** suppress messages for that capability (e.g., omit `terminal_open` if `"terminal"` is absent from `hello_ack.caps`). The guest **may** silently ignore messages for capabilities it did not advertise.
+
+**Unknown cap token:** Clients encountering an unrecognised token in `required_caps` must treat it as unsupported (disconnect). An unrecognised token in `optional_caps` or in `hello_ack.caps` must be silently ignored — forward compatibility requires ignoring unknown optional tokens.
