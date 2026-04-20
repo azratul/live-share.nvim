@@ -6,7 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.0] — 2025 (current)
+## [2.1.1] — 2026-04 (current)
+
+### Fixed
+- **Guest state machine** — `on_message` now gates messages by connection state
+  (`handshake` → `workspace_sync` → `active`). Patches and cursor events that arrive
+  before `open_files_snapshot` are buffered and replayed in order once the workspace
+  snapshot lands, preventing spurious buffer mutations during the join sequence.
+- **`open_files_snapshot` always sent** — the host now sends this message even when no
+  files are currently open, so guests always exit `workspace_sync` cleanly.
+- **`peers_snapshot` ordering** — the host now sends `peers_snapshot` before
+  `open_files_snapshot`, matching the order mandated by PROTOCOL.md §8.
+- **`hello_ack` caps corrected** — the guest now advertises `workspace`, `cursor`,
+  `follow`, and `terminal` (previously `cursor` and `follow` only).
+- **`required_caps` validation** — if the host requires a capability the guest does not
+  support, the guest sends `bye` and disconnects with an error message instead of
+  proceeding with undefined behaviour.
+- **Seq gap detection** (§7.1) — the guest tracks the last seen global `seq` number.
+  A gap triggers `file_request` for the affected path; stale/duplicate patches are
+  silently dropped. Seq tracking resets after `file_response` or `open_files_snapshot`.
+- **Out-of-range patch detection** (§7.2) — if a patch's `lnum` exceeds the current
+  buffer length, the guest sends `file_request` rather than applying a broken patch.
+- **`bye` name on abrupt disconnect** — the server now tracks peer names (set when
+  `hello_ack` is received) and includes the name in the synthesised `bye` broadcast on
+  unexpected disconnection.
+- **10 s workspace-sync watchdog** — if `open_files_snapshot` is not received within
+  10 seconds of the handshake completing, the guest disconnects with an error.
+
+---
+
+## [2.1.0] — 2026-03
 
 ### Added
 - **P2P transport via punch.lua** — when `transport = "punch"`, collaborative traffic flows

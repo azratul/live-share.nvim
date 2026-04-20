@@ -19,6 +19,15 @@ local workspace_root_name = nil
 local cursor_timer = nil
 local cursor_aug = vim.api.nvim_create_augroup("LiveShareGuestCursor", { clear = true })
 
+-- Protocol state machine: "handshake" | "workspace_sync" | "active"
+local state = "handshake"
+local msg_buffer = {} -- patches/cursors buffered during workspace_sync
+local sync_timer = nil -- 10 s watchdog; cancelled when open_files_snapshot arrives
+local last_seq_seen = nil -- global monotonic seq; nil = accept any as first
+
+-- Capabilities this client supports (must match what hello_ack advertises).
+local SUPPORTED_CAPS = { workspace = true, cursor = true, follow = true, terminal = true }
+
 local function dbg(m)
   log.dbg("guest", m)
 end
@@ -120,6 +129,33 @@ end
 -- ── Message handler ───────────────────────────────────────────────────────────
 
 local function on_message(msg)
+  -- State gate: during handshake only hello/rejected are meaningful.
+  if state == "handshake" then
+    if msg.t ~= "hello" and msg.t ~= "rejected" then
+      return
+    end
+  end
+
+  -- State gate: during workspace_sync buffer patches/cursors; allow only init
+  -- messages and safety signals (bye/error/rejected) to pass through.
+  if state == "workspace_sync" then
+    if msg.t == "patch" or msg.t == "cursor" then
+      msg_buffer[#msg_buffer + 1] = msg
+      return
+    end
+    local ws_allowed = {
+      workspace_info = true,
+      peers_snapshot = true,
+      open_files_snapshot = true,
+      bye = true,
+      rejected = true,
+      error = true,
+    }
+    if not ws_allowed[msg.t] then
+      return
+    end
+  end
+
   -- ── hello ─────────────────────────────────────────────────────────────────
   if msg.t == "hello" then
     local protocol = require("live-share.collab.protocol")
@@ -135,6 +171,22 @@ local function on_message(msg)
         )
       end)
     end
+
+    -- Validate required caps before acknowledging (§7.4).
+    for _, cap in ipairs(msg.required_caps or {}) do
+      if not SUPPORTED_CAPS[cap] then
+        vim.schedule(function()
+          vim.notify(
+            'live-share: this session requires capability "' .. cap .. '" which is not supported by this client.',
+            vim.log.levels.ERROR
+          )
+        end)
+        conn:send({ t = "bye" })
+        M.stop()
+        return
+      end
+    end
+
     session.peer_id = msg.peer_id
     session.sid = msg.sid
     guest_role = msg.role or "rw"
@@ -142,7 +194,22 @@ local function on_message(msg)
     session.host_optional_caps = msg.optional_caps or {}
     -- Register the host in presence so they appear in :LiveSharePeers.
     presence.update_peer(0, msg.host_name or "host")
-    conn:send({ t = "hello_ack", name = get_username(), caps = { "cursor", "follow" } })
+
+    -- Acknowledge and advertise all supported caps.
+    conn:send({ t = "hello_ack", name = get_username(), caps = { "workspace", "cursor", "follow", "terminal" } })
+
+    -- Transition to workspace_sync and start 10 s watchdog (§8).
+    state = "workspace_sync"
+    sync_timer = uv.new_timer()
+    sync_timer:start(
+      10000,
+      0,
+      vim.schedule_wrap(function()
+        vim.notify("live-share: timed out waiting for workspace snapshot — disconnecting", vim.log.levels.ERROR)
+        M.stop()
+      end)
+    )
+
     vim.schedule(function()
       local role_label = guest_role == "ro" and " [read-only]" or ""
       vim.api.nvim_out_write(
@@ -202,6 +269,19 @@ local function on_message(msg)
     end
     dbg("received open_files_snapshot (" .. #(msg.files or {}) .. " file(s))")
 
+    -- Transition to active state, cancel watchdog, flush buffered messages.
+    state = "active"
+    if sync_timer then
+      sync_timer:stop()
+      sync_timer:close()
+      sync_timer = nil
+    end
+    local buffered = msg_buffer
+    msg_buffer = {}
+    for _, m in ipairs(buffered) do
+      on_message(m)
+    end
+
   -- ── open_file ─────────────────────────────────────────────────────────────
   -- Host opened a new file during the session.
   elseif msg.t == "open_file" then
@@ -253,6 +333,9 @@ local function on_message(msg)
     if not msg.path then
       return
     end
+    -- A file_response replaces the buffer wholesale; reset seq tracking so the
+    -- next patch is accepted regardless of its seq number.
+    last_seq_seen = nil
     local ro = msg.readonly or (guest_role == "ro")
     local b = buffer_registry.open(msg.path, msg.lines, session.sid, ro)
     if not ro then
@@ -264,11 +347,42 @@ local function on_message(msg)
 
   -- ── patch ─────────────────────────────────────────────────────────────────
   elseif msg.t == "patch" then
-    if msg.path then
-      vim.schedule(function()
-        buffer_registry.apply(msg.path, msg)
-      end)
+    if not msg.path then
+      return
     end
+
+    -- Seq gap detection (§7.1): stale or duplicate → drop; gap → resync.
+    if msg.seq then
+      if last_seq_seen ~= nil and msg.seq <= last_seq_seen then
+        dbg("stale patch for " .. msg.path .. " (seq=" .. msg.seq .. " last=" .. last_seq_seen .. ") — dropped")
+        return
+      end
+      if last_seq_seen ~= nil and msg.seq > last_seq_seen + 1 then
+        dbg("seq gap on " .. msg.path .. ": expected " .. (last_seq_seen + 1) .. " got " .. msg.seq)
+        last_seq_seen = nil
+        conn:send({ t = "file_request", path = msg.path })
+        return
+      end
+      last_seq_seen = msg.seq
+    end
+
+    -- Out-of-range patch check (§7.2): lnum beyond buffer length → resync.
+    if msg.count ~= -1 and msg.lnum then
+      local b = buffer_registry.get_buf(msg.path)
+      if b then
+        local line_count = vim.api.nvim_buf_line_count(b)
+        if msg.lnum > line_count then
+          dbg("out-of-range patch on " .. msg.path .. " (lnum=" .. msg.lnum .. " lines=" .. line_count .. ")")
+          last_seq_seen = nil
+          conn:send({ t = "file_request", path = msg.path })
+          return
+        end
+      end
+    end
+
+    vim.schedule(function()
+      buffer_registry.apply(msg.path, msg)
+    end)
 
   -- ── save_file ─────────────────────────────────────────────────────────────
   elseif msg.t == "save_file" then
@@ -451,6 +565,11 @@ function M.stop()
     cursor_timer:close()
     cursor_timer = nil
   end
+  if sync_timer then
+    sync_timer:stop()
+    sync_timer:close()
+    sync_timer = nil
+  end
   presence.clear_all()
   follow.reset()
   require("live-share.shared_terminal").stop()
@@ -462,6 +581,9 @@ function M.stop()
   workspace_files = {}
   workspace_root_name = nil
   guest_role = nil
+  state = "handshake"
+  msg_buffer = {}
+  last_seq_seen = nil
   session.reset()
 end
 

@@ -71,6 +71,10 @@ function M.new_listener(opts)
     server.set_role(peer_id, role)
   end
 
+  function self:set_name(peer_id, name)
+    server.set_name(peer_id, name)
+  end
+
   function self:stop()
     server.stop()
   end

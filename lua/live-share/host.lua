@@ -228,7 +228,15 @@ local function on_message(msg, from_peer)
               files = files,
             })
 
+            -- Snapshot of currently connected peers so the new guest sees them immediately.
+            -- Sent before open_files_snapshot per protocol §8.
+            local peer_list = presence.get_all()
+            if #peer_list > 0 then
+              conn:send(from_peer, { t = "peers_snapshot", peers = peer_list })
+            end
+
             -- Snapshot of all currently open (tracked) buffers.
+            -- Always sent (even if empty) so the guest can transition out of WORKSPACE_SYNC.
             local open_list = {}
             for path, t in pairs(tracked) do
               if vim.api.nvim_buf_is_valid(t.buf_id) then
@@ -238,15 +246,7 @@ local function on_message(msg, from_peer)
                 }
               end
             end
-            if #open_list > 0 then
-              conn:send(from_peer, { t = "open_files_snapshot", files = open_list })
-            end
-
-            -- Snapshot of currently connected peers so the new guest sees them immediately.
-            local peer_list = presence.get_all()
-            if #peer_list > 0 then
-              conn:send(from_peer, { t = "peers_snapshot", peers = peer_list })
-            end
+            conn:send(from_peer, { t = "open_files_snapshot", files = open_list })
           end
         )
       end
@@ -255,6 +255,7 @@ local function on_message(msg, from_peer)
   -- ── hello_ack ─────────────────────────────────────────────────────────────
   elseif msg.t == "hello_ack" then
     local label = (msg.name and msg.name ~= "") and msg.name or ("guest " .. from_peer)
+    conn:set_name(from_peer, label)
     presence.update_peer(from_peer, msg.name)
     if msg.caps then
       log.dbg("host", "guest " .. from_peer .. " caps: " .. vim.inspect(msg.caps))

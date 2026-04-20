@@ -25,6 +25,7 @@ local srv = nil
 local pending = {} -- peer_id -> { handle, framer, mode }  (awaiting host approval)
 local clients = {} -- peer_id -> { handle, framer, mode }  (approved peers)
 local peer_roles = {} -- peer_id -> "rw" | "ro"
+local peer_names = {} -- peer_id -> name (for synthesising bye on abrupt disconnect)
 local next_peer = 1
 local on_message = nil
 local session_key = nil
@@ -108,8 +109,10 @@ function M.start(ip, port, key)
         pending[peer_id] = nil
         clients[peer_id] = nil
         peer_roles[peer_id] = nil
+        local name = peer_names[peer_id]
+        peer_names[peer_id] = nil
         if on_message then
-          on_message({ t = "bye", peer = peer_id }, peer_id)
+          on_message({ t = "bye", peer = peer_id, name = name }, peer_id)
         end
       end)
       if not conn:is_closing() then
@@ -227,6 +230,11 @@ function M.set_role(peer_id, role)
   dbg("peer " .. peer_id .. " role = " .. tostring(role))
 end
 
+function M.set_name(peer_id, name)
+  peer_names[peer_id] = name
+  dbg("peer " .. peer_id .. " name = " .. tostring(name))
+end
+
 function M.reject(peer_id, msg)
   local p = pending[peer_id]
   if not p or p.handle:is_closing() then
@@ -309,6 +317,7 @@ function M.stop()
   pending = {}
   clients = {}
   peer_roles = {}
+  peer_names = {}
   next_peer = 1
   session_key = nil
   if srv and not srv:is_closing() then
