@@ -59,6 +59,7 @@ function M.new_punch_listener(opts)
   local sessions = {} -- peer_id → punch session object
   local approved = {} -- peer_id → true  (after host calls approve)
   local peer_roles = {} -- peer_id → "rw" | "ro"
+  local peer_names = {} -- peer_id → name (for synthesising bye on abrupt disconnect)
   local next_peer = 1
   local stopped = false
 
@@ -172,9 +173,11 @@ function M.new_punch_listener(opts)
       sessions[peer_id] = nil
       approved[peer_id] = nil
       peer_roles[peer_id] = nil
+      local name = peer_names[peer_id]
+      peer_names[peer_id] = nil
       vim.schedule(function()
         if on_message then
-          on_message({ t = "bye", peer = peer_id }, peer_id)
+          on_message({ t = "bye", peer = peer_id, name = name }, peer_id)
         end
       end)
     end)
@@ -258,6 +261,11 @@ function M.new_punch_listener(opts)
     dbg("peer " .. peer_id .. " role = " .. tostring(role))
   end
 
+  function self:set_name(peer_id, name)
+    peer_names[peer_id] = name
+    dbg("peer " .. peer_id .. " name = " .. tostring(name))
+  end
+
   function self:stop()
     if stopped then
       return
@@ -273,6 +281,7 @@ function M.new_punch_listener(opts)
     sessions = {}
     approved = {}
     peer_roles = {}
+    peer_names = {}
   end
 
   return self
