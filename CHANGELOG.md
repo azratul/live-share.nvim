@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.1.1] — 2026-04 (current)
 
 ### Fixed
+- **ngrok TCP transport deadlock** — the client now sends a zero-length probe frame
+  immediately on connect in raw TCP mode. Previously both sides waited for the other to
+  write first, so ngrok TCP sessions never progressed past the initial connection.
 - **Guest state machine** — `on_message` now gates messages by connection state
   (`handshake` → `workspace_sync` → `active`). Patches and cursor events that arrive
   before `open_files_snapshot` are buffered and replayed in order once the workspace
