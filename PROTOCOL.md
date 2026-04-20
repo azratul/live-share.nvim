@@ -424,3 +424,178 @@ No collaborative traffic should be exchanged.
 **Missing optional cap:** The session continues normally. The host **should** suppress messages for that capability (e.g., omit `terminal_open` if `"terminal"` is absent from `hello_ack.caps`). The guest **may** silently ignore messages for capabilities it did not advertise.
 
 **Unknown cap token:** Clients encountering an unrecognised token in `required_caps` must treat it as unsupported (disconnect). An unrecognised token in `optional_caps` or in `hello_ack.caps` must be silently ignored — forward compatibility requires ignoring unknown optional tokens.
+
+---
+
+## 8. Client State Transitions
+
+A guest client moves through the following states after initiating a connection. Implementing these transitions explicitly reduces the chance of acting on messages that arrive out of order.
+
+```
+ ┌─────────────┐
+ │  CONNECTING │  TCP/WS connection established (or Punch channel open)
+ └──────┬──────┘
+        │ send: connect
+        ▼
+ ┌─────────────┐
+ │  HANDSHAKE  │  Waiting for host response
+ └──────┬──────┘
+        │ recv: hello        recv: rejected
+        ├─────────────────────────────────────► TERMINAL (show error, close)
+        ▼
+ ┌──────────────────┐
+ │ CAPS_CHECK       │  Verify required_caps; disconnect if unsupported
+ └──────┬───────────┘
+        │ caps OK → send: hello_ack
+        ▼
+ ┌──────────────────┐
+ │ WORKSPACE_SYNC   │  Waiting for workspace_info + open_files_snapshot
+ └──────┬───────────┘
+        │ recv: open_files_snapshot (last expected init message)
+        ▼
+ ┌──────────────────┐
+ │     ACTIVE       │  Full collaborative mode; all message types in §5 valid
+ └──────┬───────────┘
+        │ recv/send: bye  OR  connection error
+        ▼
+ ┌──────────────────┐
+ │    TERMINAL      │  Clean up presence state; do not reconnect
+ └──────────────────┘
+```
+
+**Notes on WORKSPACE_SYNC:**
+- `workspace_info`, `peers_snapshot` (optional), and `open_files_snapshot` all arrive in this window, in that order.
+- The client should buffer but not yet display any `patch` or `cursor` messages that arrive before `open_files_snapshot` is processed — apply them immediately after the snapshot is committed.
+- If no `open_files_snapshot` is received within a reasonable timeout (suggested: 10 s), the client should disconnect and surface an error.
+
+**Notes on ACTIVE:**
+- `file_request` / `file_response` may be used at any time during ACTIVE.
+- A `rejected` message arriving outside HANDSHAKE should be treated as a fatal error and transition to TERMINAL.
+
+---
+
+## 9. End-to-End Example Session
+
+This section walks through a minimal but complete session: one guest joining, making one edit, and disconnecting. All payloads are shown unencrypted for readability; in practice each one is wrapped as described in §2.
+
+### Setup
+
+- Host is sharing the file `src/hello.lua` containing two lines: `print("hello")` and `print("world")`.
+- Transport: WebSocket (tunnel URL `https://abc.localhost.run`).
+- Share URL copied to clipboard: `https://abc.localhost.run#key=dGVzdGtleWhlcmUxMjM0NTY3OA`
+
+### 1. Guest connects
+
+Guest opens a TCP connection to `abc.localhost.run:443` and completes the WebSocket upgrade (HTTP `Upgrade: websocket`). Then sends:
+
+```json
+{ "t": "connect" }
+```
+
+### 2. Host approves and sends hello
+
+The host prompts the user ("Bob wants to join — approve?") and on approval sends:
+
+```json
+{
+  "t": "hello",
+  "protocol_version": 3,
+  "peer_id": 1,
+  "sid": "f4a9b2c1",
+  "role": "rw",
+  "host_name": "alice",
+  "required_caps": ["workspace"],
+  "optional_caps": ["cursor", "follow"]
+}
+```
+
+### 3. Guest checks caps and acknowledges
+
+Guest supports `workspace` and `cursor`; does not implement `follow`. Responds:
+
+```json
+{ "t": "hello_ack", "name": "bob", "caps": ["workspace", "cursor"] }
+```
+
+### 4. Host sends workspace init sequence
+
+```json
+{ "t": "workspace_info", "root_name": "my-project", "files": ["src/hello.lua", "README.md"] }
+```
+
+No other guests are connected, so `peers_snapshot` is omitted. Then:
+
+```json
+{
+  "t": "open_files_snapshot",
+  "files": [
+    { "path": "src/hello.lua", "lines": ["print(\"hello\")", "print(\"world\")"] }
+  ]
+}
+```
+
+Guest is now in ACTIVE state and opens a virtual buffer for `src/hello.lua`.
+
+### 5. Guest edits line 1
+
+Bob changes `print("hello")` to `print("hi")`. Guest sends:
+
+```json
+{ "t": "patch", "path": "src/hello.lua", "seq": 0, "lnum": 0, "count": 1, "lines": ["print(\"hi\")"], "peer": 1 }
+```
+
+Host applies the patch, assigns `seq: 42` (its current counter), and broadcasts to all peers including the originating guest:
+
+```json
+{ "t": "patch", "path": "src/hello.lua", "seq": 42, "lnum": 0, "count": 1, "lines": ["print(\"hi\")"], "peer": 1 }
+```
+
+Guest receives the broadcast, confirms `seq: 42`, and treats it as the authoritative version (replacing any optimistic local state).
+
+### 6. Guest disconnects
+
+Bob closes the session. Guest sends:
+
+```json
+{ "t": "bye", "peer": 1, "name": "bob" }
+```
+
+Guest closes the connection. Host removes the peer from its registry. If other guests were connected, the host would broadcast the `bye` on Bob's behalf — but in this example there are none.
+
+---
+
+## 10. Compatibility and Stability
+
+### What is stable
+
+The following are considered stable across minor version bumps and will not change without a `protocol_version` increment:
+
+- All message types defined in §5 and their required fields.
+- The transport auto-detection mechanism (§1).
+- The encryption envelope format (§2.2).
+- The `seq`-based ordering contract (§7.1).
+- The capability token names defined in §5.1.
+
+### What may still change
+
+- **New optional fields** may be added to any message without a version bump. Clients must ignore unknown fields.
+- **New optional capability tokens** may be introduced without a version bump. Clients must ignore unknown tokens in `optional_caps`.
+- **New message types** may be added without a version bump. Clients must silently discard messages with an unrecognised `t` field.
+- **Punch transport details** (§1.3) — the signaling HTTP API and hole-punching flow are still maturing and may change in a minor release with notice in the changelog.
+
+### Breaking changes
+
+A change is considered breaking if it:
+- Removes or renames an existing field in a stable message.
+- Changes the semantic meaning of an existing field.
+- Adds a new **required** capability that existing clients cannot negotiate around.
+
+Breaking changes will always increment `protocol_version`. The changelog in §4 will describe the delta. Clients receiving a `protocol_version` higher than their own **must** warn the user and **may** refuse to connect.
+
+### `file_request` response timeout
+
+`file_request` is a fire-and-forget message — the guest sends it once and waits for the matching `file_response` or `error`. There is no retry mechanism. If no response arrives within 10 seconds, the guest should treat the silence as a connection error and transition to TERMINAL state.
+
+### Terminal input encoding
+
+The `data` field of `terminal_input` is a raw byte string (UTF-8). Control sequences (e.g. `\u0003` for Ctrl+C, `\u001b[A` for arrow-up) are included verbatim and must not be escaped or transformed. The host passes the bytes directly to the PTY via `chansend` without any modification; the guest must do the same in the opposite direction.
