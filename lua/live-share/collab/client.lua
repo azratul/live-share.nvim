@@ -95,6 +95,9 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
       end)
       send_frame = tcp_trans.frame
       local reader = tcp_trans.new_reader()
+      -- Send a zero-length probe so the server can detect raw TCP mode.
+      -- Without this both sides wait for the other to write first.
+      tcp:write("\x00\x00\x00\x00")
 
       tcp:read_start(function(read_err, data)
         if read_err or not data then
