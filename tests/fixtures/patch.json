@@ -1,0 +1,8 @@
+{
+  "t": "patch",
+  "path": "lua/main.lua",
+  "lnum": 4,
+  "count": 2,
+  "lines": ["local x = 1", "local y = 2"],
+  "seq": 42
+}
