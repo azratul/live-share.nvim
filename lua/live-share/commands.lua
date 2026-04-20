@@ -62,18 +62,15 @@ function M.join(url, port)
   if url:match("^punch%+") then
     -- Punch (P2P) transport: "punch+http://tunnel-host:port" or "punch+host:port"
     url  = url:gsub("^punch%+", "")
-    -- TCP tunnel (e.g. ngrok): transparent relay — the punch signaling client
-    -- speaks plain HTTP, so convert tcp:// to http://.
+    -- Normalize tcp:// → http:// (punch signaling speaks HTTP/HTTPS, not raw TCP).
     if url:match("^tcp://") then
       local h, p = url:match("^tcp://([^:]+):(%d+)")
       if h and p then url = "http://" .. h .. ":" .. p end
-    -- If it doesn't have a scheme, prepend http:// (signaling server is HTTP).
     elseif not url:match("^https?://") then
       url = "http://" .. url
     end
-    -- Note: HTTPS URLs from SSH-based tunnels (localhost.run, serveo) are NOT
-    -- compatible with punch because the signaling client only speaks plain HTTP.
-    -- Use service = "ngrok" (TCP) when transport = "punch".
+    -- The signaling client supports both http:// and https://.
+    -- ngrok TCP and ngrok HTTPS have both been confirmed to work.
     mode = "punch"
   elseif url:match("^tcp://") then
     local h, p = url:match("^tcp://([^:]+):(%d+)")

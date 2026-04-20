@@ -1,4 +1,4 @@
-# Live-Share.nvim Protocol Specification (v1.0.0)
+# Live-Share.nvim Protocol Specification (v1.1.0)
 
 This document describes the communication protocol used by `live-share.nvim`. It is designed to allow developers to implement compatible plugins for other editors.
 
@@ -6,7 +6,7 @@ This document describes the communication protocol used by `live-share.nvim`. It
 
 ## 1. Transport Layer
 
-The protocol supports two transport modes, automatically detected by the server on the first 4 bytes of a connection.
+The protocol supports three transport modes. For WS and TCP the server auto-detects the mode from the first 4 bytes of the connection. For Punch the transport is indicated by the `punch+` URL prefix and uses a separate signaling flow.
 
 ### 1.1 WebSocket (WS)
 Used for HTTP tunneling services (e.g., `serveo.net`, `localhost.run`).
@@ -17,6 +17,53 @@ Used for HTTP tunneling services (e.g., `serveo.net`, `localhost.run`).
 Used for direct connections or `ngrok` (TCP mode).
 - **Framing:** Each message is prefixed with a **4-byte Little Endian unsigned integer** representing the length of the payload.
 - Example: A 10-byte payload is prefixed with `0A 00 00 00`.
+
+### 1.3 Punch (P2P UDP)
+
+Used when `transport = "punch"` is configured. The tunnel is used only during the short signaling phase (~5 s); all collaborative traffic then flows over a **direct encrypted UDP channel** between host and guest, bypassing the tunnel server entirely.
+
+**Dependency:** requires the [`punch`](https://luarocks.org/modules/azratul/punch) LuaRocks package on both sides.
+
+**Compatibility:** the signaling client supports both `http://` and `https://` URLs (TLS is handled natively by the `punch` library). ngrok in TCP mode (`tcp://`) and HTTPS mode (`https://`) have both been confirmed to work. Compatibility with SSH-based tunnels (`localhost.run`, `serveo`) is untested.
+
+#### 1.3.1 URL Format
+
+The shared URL has a `punch+` scheme prefix:
+
+```
+punch+<signaling-server-url>#key=<base64url>
+```
+
+Examples:
+```
+punch+http://0.tcp.ngrok.io:12345#key=<base64url>
+punch+tcp://0.tcp.ngrok.io:12345#key=<base64url>   ← tcp:// is normalized to http://
+```
+
+Guests strip the `punch+` prefix, normalize `tcp://` to `http://`, and treat the remainder as the signaling server URL.
+
+#### 1.3.2 Signaling Flow
+
+The host runs a lightweight HTTP signaling server (port chosen by the OS; exposed via the tunnel). The handshake proceeds as follows:
+
+1. **Host** gathers local ICE candidates and publishes a *host description* to the signaling server (`set_host_desc`).
+2. **Guest** sends `GET /` to the signaling server (long-poll, up to 30 s) to fetch the host description and a `slot` identifier.
+3. **Guest** concurrently gathers its own local candidates.
+4. **Guest** sends `POST /guest/<slot>` with its own description (`post_guest`).
+5. **Host** receives the guest description and both peers attempt UDP hole-punching.
+6. Once the UDP channel reaches state `open`, collaborative traffic begins using the same message types as WS/TCP (§5).
+
+The signaling server accepts only one pending guest at a time. While guest N is connecting, the host immediately prepares a new session slot for guest N+1 (star topology — each guest has an independent UDP socket).
+
+#### 1.3.3 Encryption
+
+The session key from `#key=<base64url>` is passed directly to `punch.session.new()` for **channel-level AES-256-GCM** encryption. Protocol payloads are therefore **plain JSON** (no nonce/ciphertext wrapper — that layer is handled by punch itself).
+
+Implementors not using the `punch` library must apply AES-256-GCM encryption at the UDP frame level with the same `[12-byte nonce][ciphertext+tag]` structure described in §2.2, using the decoded `#key` as the symmetric key.
+
+#### 1.3.4 Framing
+
+Each UDP datagram carries exactly one protocol message (after decryption). There is no length-prefix — the datagram boundary is the message boundary.
 
 ---
 
@@ -293,3 +340,10 @@ User keystrokes to be sent to the host's PTY.
 2.  **Path Mapping:** All paths in the protocol are relative to the workspace root.
 3.  **Syntax Highlighting:** Clients should infer the language from the file extension in the `path` field.
 4.  **Debouncing:** Cursor movements should be debounced (e.g., 100ms) to avoid flooding the network.
+5.  **Transport detection from the URL:**
+    - URL starts with `punch+` → Punch transport (§1.3). Strip the prefix and use the remainder as the signaling server URL.
+    - URL starts with `tcp://` → Raw TCP transport (§1.2).
+    - URL starts with `http://` or `https://` → WebSocket transport (§1.1).
+    - Bare `host:port` (no scheme) → WebSocket transport (§1.1).
+6.  **Punch — signaling timeout:** `fetch_host` should long-poll for at least 30 s to handle slow tunnel startup. If the host description is not available after the timeout, surface a connection error to the user without retrying automatically.
+7.  **Punch — encryption:** Do not apply the §2.2 nonce/ciphertext wrapping when using the Punch transport. Encryption is handled at the channel level by the punch library. Payload bytes are raw JSON.
