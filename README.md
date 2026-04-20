@@ -262,6 +262,24 @@ For a detailed technical specification of the communication layer, message schem
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
 - **Shared terminal**: PTY I/O streamed over the same encrypted connection as all other session events.
 
+## Stability matrix
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `ws` transport | **Stable** | Default mode; WebSocket over TCP, auto-detects raw TCP vs WS from first 4 bytes |
+| AES-256-GCM encryption | **Stable** | Required; sessions will not start without OpenSSL |
+| Buffer sync (patch) | **Stable** | Line-level LWW, host-assigned monotonic seq |
+| Remote cursors and selections | **Stable** | EOL extmarks, per-peer color, visual range highlight |
+| Guest approval and roles | **Stable** | RW / RO per guest, prompted via `vim.ui.select` |
+| Protocol v3 | **Stable** | Spec in [PROTOCOL.md](./PROTOCOL.md); version negotiation in [COMPATIBILITY.md](./COMPATIBILITY.md) |
+| Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
+| Follow mode | **Beta** | Buffer tracking works; minor edge cases on rapid switches |
+| Workspace browser | **Beta** | File tree and open-by-path work; large workspaces untested |
+| `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); cross-network testing pending |
+| Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
+
+The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers. Everything else may have rough edges. Issues and feedback are welcome.
+
 ## Contributing
 
 Feel free to open issues or submit pull requests.
