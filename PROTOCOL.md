@@ -1,4 +1,4 @@
-# Live-Share.nvim Protocol Specification (v1.1.0)
+# Live-Share.nvim Protocol Specification (v1.2.0)
 
 This document describes the communication protocol used by `live-share.nvim`. It is designed to allow developers to implement compatible plugins for other editors.
 
@@ -168,7 +168,7 @@ Every message is a JSON object with a type field `t`.
 ```json
 {
   "t": "hello",
-  "protocol_version": 1,
+  "protocol_version": 3,
   "peer_id": 1,
   "sid": "a1b2c3d4",
   "role": "rw",
