@@ -15,25 +15,31 @@
 --   Only approved peers (in `clients`) receive broadcasts and can send patches.
 local M = {}
 
-local protocol  = require("live-share.collab.protocol")
+local protocol = require("live-share.collab.protocol")
 local tcp_trans = require("live-share.collab.transport.tcp")
-local ws_trans  = require("live-share.collab.transport.ws")
-local log       = require("live-share.collab.log")
+local ws_trans = require("live-share.collab.transport.ws")
+local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
-local srv         = nil
-local pending     = {}   -- peer_id -> { handle, framer, mode }  (awaiting host approval)
-local clients     = {}   -- peer_id -> { handle, framer, mode }  (approved peers)
-local peer_roles  = {}   -- peer_id -> "rw" | "ro"
-local next_peer   = 1
-local on_message  = nil
+local srv = nil
+local pending = {} -- peer_id -> { handle, framer, mode }  (awaiting host approval)
+local clients = {} -- peer_id -> { handle, framer, mode }  (approved peers)
+local peer_roles = {} -- peer_id -> "rw" | "ro"
+local next_peer = 1
+local on_message = nil
 local session_key = nil
 
 -- Module-level framers so broadcast can use them as stable cache keys.
-local function ws_framer(payload)  return ws_trans.frame(payload) end
-local function tcp_framer(payload) return tcp_trans.frame(payload) end
+local function ws_framer(payload)
+  return ws_trans.frame(payload)
+end
+local function tcp_framer(payload)
+  return tcp_trans.frame(payload)
+end
 
-local function dbg(msg) log.dbg("server", msg) end
+local function dbg(msg)
+  log.dbg("server", msg)
+end
 
 function M.setup(cb)
   on_message = cb
@@ -61,7 +67,7 @@ function M.start(ip, port, key)
       return
     end
 
-    local conn    = uv.new_tcp()
+    local conn = uv.new_tcp()
     srv:accept(conn)
 
     local peer_id = next_peer
@@ -69,56 +75,70 @@ function M.start(ip, port, key)
     dbg("peer " .. peer_id .. " TCP accepted")
 
     -- State: "detecting" | "ws_hs" | "ws" | "tcp"
-    local state  = "detecting"
-    local buf    = ""
-    local reader = nil  -- stateful fn(chunk) → { payload, ... }; set at detection time
+    local state = "detecting"
+    local buf = ""
+    local reader = nil -- stateful fn(chunk) → { payload, ... }; set at detection time
 
     local function dispatch(msg)
       -- Drop messages from unapproved peers (they're still in pending).
-      if not clients[peer_id] then return end
+      if not clients[peer_id] then
+        return
+      end
       -- Enforce read-only: reject patch messages from ro peers.
       if msg.t == "patch" and peer_roles[peer_id] == "ro" then
         dbg("peer " .. peer_id .. " is read-only — rejecting patch")
         M.send(peer_id, {
-          t       = "error",
-          code    = "unauthorized",
+          t = "error",
+          code = "unauthorized",
           message = "read-only guests cannot send patches",
         })
         return
       end
       vim.schedule(function()
         dbg("msg '" .. tostring(msg.t) .. "' from peer " .. peer_id)
-        if on_message then on_message(msg, peer_id) end
+        if on_message then
+          on_message(msg, peer_id)
+        end
       end)
     end
 
     local function on_disconnect(reason)
       vim.schedule(function()
         dbg("peer " .. peer_id .. " disconnected: " .. tostring(reason))
-        pending[peer_id]    = nil
-        clients[peer_id]    = nil
+        pending[peer_id] = nil
+        clients[peer_id] = nil
         peer_roles[peer_id] = nil
-        if on_message then on_message({ t = "bye", peer = peer_id }, peer_id) end
+        if on_message then
+          on_message({ t = "bye", peer = peer_id }, peer_id)
+        end
       end)
-      if not conn:is_closing() then conn:close() end
+      if not conn:is_closing() then
+        conn:close()
+      end
     end
 
     local function process(data)
       local payloads = reader(data)
       for _, payload in ipairs(payloads) do
         local msg = protocol.decode(payload, session_key)
-        if msg then dispatch(msg) end
+        if msg then
+          dispatch(msg)
+        end
       end
     end
 
     local function complete_ws_handshake(initial_buf)
       local response, rest, err_msg = ws_trans.server_handshake_response(initial_buf)
-      if response == nil then return false end  -- need more data
+      if response == nil then
+        return false
+      end -- need more data
 
       if response == false then
         dbg("peer " .. peer_id .. " — " .. (err_msg or "bad WS request") .. "; closing")
-        if not conn:is_closing() then conn:close() end
-        return true  -- done (with error)
+        if not conn:is_closing() then
+          conn:close()
+        end
+        return true -- done (with error)
       end
 
       conn:write(response)
@@ -126,9 +146,13 @@ function M.start(ip, port, key)
       pending[peer_id] = { handle = conn, framer = ws_framer, mode = "ws" }
       dbg("peer " .. peer_id .. " WS handshake done — awaiting host approval")
       vim.schedule(function()
-        if on_message then on_message({ t = "connect", peer = peer_id }, peer_id) end
+        if on_message then
+          on_message({ t = "connect", peer = peer_id }, peer_id)
+        end
       end)
-      if #rest > 0 then process(rest) end
+      if #rest > 0 then
+        process(rest)
+      end
       return true
     end
 
@@ -141,19 +165,23 @@ function M.start(ip, port, key)
       buf = buf .. data
 
       if state == "detecting" then
-        if #buf < 4 then return end
+        if #buf < 4 then
+          return
+        end
         if buf:sub(1, 4) == "GET " then
-          state  = "ws_hs"
+          state = "ws_hs"
           reader = ws_trans.new_reader()
           dbg("peer " .. peer_id .. " → WebSocket mode")
           -- fall through to ws_hs handling below
         else
-          state  = "tcp"
+          state = "tcp"
           reader = tcp_trans.new_reader()
           pending[peer_id] = { handle = conn, framer = tcp_framer, mode = "tcp" }
           dbg("peer " .. peer_id .. " → raw TCP mode — awaiting host approval")
           vim.schedule(function()
-            if on_message then on_message({ t = "connect", peer = peer_id }, peer_id) end
+            if on_message then
+              on_message({ t = "connect", peer = peer_id }, peer_id)
+            end
           end)
           process(buf)
           buf = ""
@@ -162,12 +190,20 @@ function M.start(ip, port, key)
       end
 
       if state == "ws_hs" then
-        if complete_ws_handshake(buf) then buf = "" end
+        if complete_ws_handshake(buf) then
+          buf = ""
+        end
         return
       end
 
-      if state == "ws"  then process(data); return end
-      if state == "tcp" then process(data); return end
+      if state == "ws" then
+        process(data)
+        return
+      end
+      if state == "tcp" then
+        process(data)
+        return
+      end
     end)
   end)
   return true
@@ -200,11 +236,15 @@ function M.reject(peer_id, msg)
   local ok, frame = pcall(function()
     return p.framer(protocol.encode(msg, session_key))
   end)
-  if ok and frame then p.handle:write(frame) end
+  if ok and frame then
+    p.handle:write(frame)
+  end
   local t = uv.new_timer()
   t:start(100, 0, function()
     t:close()
-    if not p.handle:is_closing() then p.handle:close() end
+    if not p.handle:is_closing() then
+      p.handle:close()
+    end
   end)
   pending[peer_id] = nil
   dbg("peer " .. peer_id .. " rejected")
@@ -238,12 +278,18 @@ end
 function M.broadcast(msg, except_peer)
   -- Encode payload once; frame once per transport type.
   local payload = nil
-  local framed  = {}  -- mode tag → framed bytes
+  local framed = {} -- mode tag → framed bytes
   for pid, c in pairs(clients) do
-    if pid == except_peer or c.handle:is_closing() then goto continue end
+    if pid == except_peer or c.handle:is_closing() then
+      goto continue
+    end
 
-    if not payload then payload = protocol.encode(msg, session_key) end
-    if not framed[c.mode] then framed[c.mode] = c.framer(payload) end
+    if not payload then
+      payload = protocol.encode(msg, session_key)
+    end
+    if not framed[c.mode] then
+      framed[c.mode] = c.framer(payload)
+    end
     c.handle:write(framed[c.mode])
     ::continue::
   end
@@ -251,15 +297,19 @@ end
 
 function M.stop()
   for _, c in pairs(pending) do
-    if not c.handle:is_closing() then c.handle:close() end
+    if not c.handle:is_closing() then
+      c.handle:close()
+    end
   end
   for _, c in pairs(clients) do
-    if not c.handle:is_closing() then c.handle:close() end
+    if not c.handle:is_closing() then
+      c.handle:close()
+    end
   end
-  pending     = {}
-  clients     = {}
-  peer_roles  = {}
-  next_peer   = 1
+  pending = {}
+  clients = {}
+  peer_roles = {}
+  next_peer = 1
   session_key = nil
   if srv and not srv:is_closing() then
     srv:close()

@@ -20,12 +20,14 @@
 local M = {}
 
 local ok_punch, punch = pcall(require, "punch")
-local ok_sig,   sig   = pcall(require, "punch.signaling_server")
+local ok_sig, sig = pcall(require, "punch.signaling_server")
 
 local protocol = require("live-share.collab.protocol")
-local log      = require("live-share.collab.log")
+local log = require("live-share.collab.log")
 
-local function dbg(m) log.dbg("punch_conn", m) end
+local function dbg(m)
+  log.dbg("punch_conn", m)
+end
 
 -- ── Listener (host side) ─────────────────────────────────────────────────────
 
@@ -42,8 +44,8 @@ function M.new_punch_listener(opts)
   end
 
   local session_key = opts.key
-  local on_message  = opts.on_msg
-  local stun        = opts.stun or "stun.l.google.com:19302"
+  local on_message = opts.on_msg
+  local stun = opts.stun or "stun.l.google.com:19302"
 
   local sig_srv, srv_err = sig.new({ host = "0.0.0.0", port = 0 })
   if not sig_srv then
@@ -54,11 +56,11 @@ function M.new_punch_listener(opts)
     error("punch_conn: failed to start signaling server: " .. tostring(srv_err))
   end
 
-  local sessions   = {}    -- peer_id → punch session object
-  local approved   = {}    -- peer_id → true  (after host calls approve)
-  local peer_roles = {}    -- peer_id → "rw" | "ro"
-  local next_peer  = 1
-  local stopped    = false
+  local sessions = {} -- peer_id → punch session object
+  local approved = {} -- peer_id → true  (after host calls approve)
+  local peer_roles = {} -- peer_id → "rw" | "ro"
+  local next_peer = 1
+  local stopped = false
 
   local self = {
     signaling_port = tonumber(sig_srv.url:match(":(%d+)$")),
@@ -71,8 +73,12 @@ function M.new_punch_listener(opts)
     local found = false
     -- Try most recent sessions first.
     local pids = {}
-    for pid in pairs(sessions) do table.insert(pids, pid) end
-    table.sort(pids, function(a, b) return a > b end)
+    for pid in pairs(sessions) do
+      table.insert(pids, pid)
+    end
+    table.sort(pids, function(a, b)
+      return a > b
+    end)
 
     for _, pid in ipairs(pids) do
       local s = sessions[pid]
@@ -90,7 +96,9 @@ function M.new_punch_listener(opts)
 
   -- Encode a message and send it over a specific punch session.
   local function send_via_session(s, msg)
-    if not s or s.state ~= "open" then return end
+    if not s or s.state ~= "open" then
+      return
+    end
     local payload = protocol.encode(msg, nil)
     s:send(payload)
   end
@@ -99,7 +107,9 @@ function M.new_punch_listener(opts)
   -- Creates a new punch session, gathers candidates, publishes the host
   -- description, then waits for a guest to post theirs.
   local function prepare_for_guest()
-    if stopped then return end
+    if stopped then
+      return
+    end
 
     local peer_id = next_peer
     next_peer = next_peer + 1
@@ -118,7 +128,9 @@ function M.new_punch_listener(opts)
 
     s:on("message", function(data)
       local msg = protocol.decode(data, nil)
-      if not msg then return end
+      if not msg then
+        return
+      end
       -- Drop messages from unapproved peers.
       if not approved[peer_id] then
         dbg("dropping msg from unapproved peer " .. peer_id .. " (t=" .. tostring(msg.t) .. ")")
@@ -128,15 +140,17 @@ function M.new_punch_listener(opts)
       if msg.t == "patch" and peer_roles[peer_id] == "ro" then
         dbg("peer " .. peer_id .. " is read-only — rejecting patch")
         send_via_session(s, {
-          t       = "error",
-          code    = "unauthorized",
+          t = "error",
+          code = "unauthorized",
           message = "read-only guests cannot send patches",
         })
         return
       end
       vim.schedule(function()
         dbg("msg '" .. tostring(msg.t) .. "' from peer " .. peer_id)
-        if on_message then on_message(msg, peer_id) end
+        if on_message then
+          on_message(msg, peer_id)
+        end
       end)
     end)
 
@@ -145,7 +159,9 @@ function M.new_punch_listener(opts)
       -- Notify the host that a new guest wants to join (approval prompt).
       vim.schedule(function()
         vim.notify("live-share: peer " .. peer_id .. " connected (P2P)", vim.log.levels.INFO)
-        if on_message then on_message({ t = "connect", peer = peer_id }, peer_id) end
+        if on_message then
+          on_message({ t = "connect", peer = peer_id }, peer_id)
+        end
       end)
       -- Start preparing for the next guest right away so another one can join.
       prepare_for_guest()
@@ -153,11 +169,13 @@ function M.new_punch_listener(opts)
 
     s:on("close", function(reason)
       dbg("peer " .. peer_id .. " closed: " .. tostring(reason))
-      sessions[peer_id]   = nil
-      approved[peer_id]   = nil
+      sessions[peer_id] = nil
+      approved[peer_id] = nil
       peer_roles[peer_id] = nil
       vim.schedule(function()
-        if on_message then on_message({ t = "bye", peer = peer_id }, peer_id) end
+        if on_message then
+          on_message({ t = "bye", peer = peer_id }, peer_id)
+        end
       end)
     end)
 
@@ -166,7 +184,10 @@ function M.new_punch_listener(opts)
     -- (Using state_change instead would race: session.lua emits state_change
     -- synchronously inside _set_state, which runs before _local_desc is assigned.)
     s:gather(function(err)
-      if stopped then s:close(); return end
+      if stopped then
+        s:close()
+        return
+      end
       if err then
         dbg("gather failed for peer " .. peer_id .. ": " .. tostring(err and err.message or err))
         vim.defer_fn(prepare_for_guest, 2000)
@@ -226,8 +247,8 @@ function M.new_punch_listener(opts)
       end
       s:close()
     end
-    sessions[peer_id]   = nil
-    approved[peer_id]   = nil
+    sessions[peer_id] = nil
+    approved[peer_id] = nil
     peer_roles[peer_id] = nil
     dbg("peer " .. peer_id .. " rejected")
   end
@@ -238,7 +259,9 @@ function M.new_punch_listener(opts)
   end
 
   function self:stop()
-    if stopped then return end
+    if stopped then
+      return
+    end
     stopped = true
     if sig_srv then
       sig_srv:stop()
@@ -247,8 +270,8 @@ function M.new_punch_listener(opts)
     for _, s in pairs(sessions) do
       s:close()
     end
-    sessions   = {}
-    approved   = {}
+    sessions = {}
+    approved = {}
     peer_roles = {}
   end
 
@@ -270,10 +293,10 @@ function M.new_punch_connector(opts)
   end
 
   local session_key = opts.key
-  local on_message  = opts.on_msg
-  local stun        = opts.stun or "stun.l.google.com:19302"
+  local on_message = opts.on_msg
+  local stun = opts.stun or "stun.l.google.com:19302"
 
-  local s    = punch.session.new({ stun = stun, key = session_key })
+  local s = punch.session.new({ stun = stun, key = session_key })
   local self = {}
 
   s:on("error", function(e)
@@ -288,9 +311,13 @@ function M.new_punch_connector(opts)
     -- We pass nil as the key because punch.lua v0.2.0 already provides
     -- E2E encryption via peer_key.
     local msg = protocol.decode(data, nil)
-    if not msg then return end
+    if not msg then
+      return
+    end
     vim.schedule(function()
-      if on_message then on_message(msg) end
+      if on_message then
+        on_message(msg)
+      end
     end)
   end)
 
@@ -300,7 +327,9 @@ function M.new_punch_connector(opts)
       if reason and reason ~= "closed by local peer" then
         vim.notify("live-share: P2P connection closed: " .. tostring(reason), vim.log.levels.WARN)
       end
-      if on_message then on_message({ t = "bye", peer = 0 }) end
+      if on_message then
+        on_message({ t = "bye", peer = 0 })
+      end
     end)
   end)
 
@@ -321,20 +350,24 @@ function M.new_punch_connector(opts)
   function self:connect(signaling_url, _port, on_error)
     dbg("connecting via signaling URL: " .. tostring(signaling_url))
 
-    local my_desc   = nil
+    local my_desc = nil
     local host_desc = nil
-    local slot_id   = nil
-    local joined    = false
+    local slot_id = nil
+    local joined = false
 
     local function try_exchange()
-      if joined or not my_desc or not host_desc or not slot_id then return end
+      if joined or not my_desc or not host_desc or not slot_id then
+        return
+      end
       joined = true
 
       sig.post_guest(signaling_url, slot_id, my_desc, function(post_err)
         if post_err then
           dbg("post_guest error: " .. tostring(post_err))
           if on_error then
-            vim.schedule(function() on_error("signaling post failed: " .. post_err) end)
+            vim.schedule(function()
+              on_error("signaling post failed: " .. post_err)
+            end)
           end
         end
       end)
@@ -350,7 +383,11 @@ function M.new_punch_connector(opts)
       if err then
         local msg = "punch gather failed: " .. tostring(err and err.message or err)
         dbg(msg)
-        if on_error then vim.schedule(function() on_error(msg) end) end
+        if on_error then
+          vim.schedule(function()
+            on_error(msg)
+          end)
+        end
         return
       end
       my_desc = s:get_local_description()
@@ -363,11 +400,15 @@ function M.new_punch_connector(opts)
       if fetch_err then
         local msg = "signaling fetch failed: " .. tostring(fetch_err)
         dbg(msg)
-        if on_error then vim.schedule(function() on_error(msg) end) end
+        if on_error then
+          vim.schedule(function()
+            on_error(msg)
+          end)
+        end
         return
       end
       host_desc = hdesc
-      slot_id   = slot
+      slot_id = slot
       dbg("fetched host desc (slot " .. tostring(slot) .. ")")
       try_exchange()
     end)

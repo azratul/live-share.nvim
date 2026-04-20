@@ -1,12 +1,24 @@
 -- Command handlers: bridge between user commands and host/guest modules.
 local M = {}
 
-local function host()    return require("live-share.host")    end
-local function guest()   return require("live-share.guest")   end
-local function follow()  return require("live-share.follow")  end
-local function ui()      return require("live-share.ui")      end
-local function session() return require("live-share.session") end
-local function tunnel()  return require("live-share.tunnel")  end
+local function host()
+  return require("live-share.host")
+end
+local function guest()
+  return require("live-share.guest")
+end
+local function follow()
+  return require("live-share.follow")
+end
+local function ui()
+  return require("live-share.ui")
+end
+local function session()
+  return require("live-share.session")
+end
+local function tunnel()
+  return require("live-share.tunnel")
+end
 
 function M.setup(config)
   M.config = config
@@ -20,12 +32,17 @@ function M.host_start(port)
     return
   end
   if not require("live-share.collab.crypto").available then
-    vim.notify("live-share: OpenSSL is not available — encryption is required to start a session", vim.log.levels.ERROR)
+    vim.notify(
+      "live-share: OpenSSL is not available — encryption is required to start a session",
+      vim.log.levels.ERROR
+    )
     return
   end
   local h = host()
   h.setup(M.config)
-  if not h.start(port) then return end
+  if not h.start(port) then
+    return
+  end
 
   if M.config.transport == "punch" then
     local sig_port = h.get_signaling_port()
@@ -46,14 +63,20 @@ function M.join(url, port)
     return
   end
   if not require("live-share.collab.crypto").available then
-    vim.notify("live-share: OpenSSL is not available — encryption is required to join a session", vim.log.levels.ERROR)
+    vim.notify(
+      "live-share: OpenSSL is not available — encryption is required to join a session",
+      vim.log.levels.ERROR
+    )
     return
   end
   port = port or M.config.port
 
   local key_b64 = url:match("#key=([A-Za-z0-9_%-]+)")
   if not key_b64 then
-    vim.notify("live-share: no encryption key found in URL (#key=...) — refusing to connect without encryption", vim.log.levels.ERROR)
+    vim.notify(
+      "live-share: no encryption key found in URL (#key=...) — refusing to connect without encryption",
+      vim.log.levels.ERROR
+    )
     return
   end
   url = url:gsub("#.*$", "")
@@ -61,11 +84,13 @@ function M.join(url, port)
   local mode
   if url:match("^punch%+") then
     -- Punch (P2P) transport: "punch+http://tunnel-host:port" or "punch+host:port"
-    url  = url:gsub("^punch%+", "")
+    url = url:gsub("^punch%+", "")
     -- Normalize tcp:// → http:// (punch signaling speaks HTTP/HTTPS, not raw TCP).
     if url:match("^tcp://") then
       local h, p = url:match("^tcp://([^:]+):(%d+)")
-      if h and p then url = "http://" .. h .. ":" .. p end
+      if h and p then
+        url = "http://" .. h .. ":" .. p
+      end
     elseif not url:match("^https?://") then
       url = "http://" .. url
     end
@@ -74,16 +99,16 @@ function M.join(url, port)
     mode = "punch"
   elseif url:match("^tcp://") then
     local h, p = url:match("^tcp://([^:]+):(%d+)")
-    url  = h
+    url = h
     port = tonumber(p)
     mode = "tcp"
   elseif url:match("^https?://") then
-    url  = url:gsub("^https?://", "")
+    url = url:gsub("^https?://", "")
     mode = "ws"
   elseif url:match("^[%w._%-]+:%d+$") then
     -- bare host:port without scheme (e.g. bore.pub:12345)
     local h, p = url:match("^([^:]+):(%d+)")
-    url  = h
+    url = h
     port = tonumber(p)
     mode = "ws"
   end
@@ -171,17 +196,24 @@ function M.terminal()
   else
     vim.notify(
       "live-share: the host opens shared terminals — they appear automatically when ready",
-      vim.log.levels.INFO)
+      vim.log.levels.INFO
+    )
   end
 end
 
 -- Tab-completion helper for :LiveShareOpen.
 function M.complete_workspace_path(arg_lead)
   local ok, g = pcall(require, "live-share.guest")
-  if not ok then return {} end
+  if not ok then
+    return {}
+  end
   local files = g.get_workspace_files()
-  if arg_lead == "" then return files end
-  return vim.tbl_filter(function(f) return f:find(arg_lead, 1, true) ~= nil end, files)
+  if arg_lead == "" then
+    return files
+  end
+  return vim.tbl_filter(function(f)
+    return f:find(arg_lead, 1, true) ~= nil
+  end, files)
 end
 
 return M

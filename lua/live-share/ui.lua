@@ -19,7 +19,7 @@ local function build_tree(paths)
 
   for _, path in ipairs(paths) do
     local parts = vim.split(path, "/", { plain = true })
-    local node  = root
+    local node = root
     for i = 1, #parts - 1 do
       local dir = parts[i]
       if not node.children[dir] then
@@ -42,7 +42,9 @@ local function render_tree(node, lines, indent, path_map)
   -- Sort: dirs before files, alphabetical within each group.
   local order = vim.deepcopy(node._order)
   table.sort(order, function(a, b)
-    if a.kind ~= b.kind then return a.kind == "dir" end
+    if a.kind ~= b.kind then
+      return a.kind == "dir"
+    end
     return a.name < b.name
   end)
 
@@ -52,7 +54,7 @@ local function render_tree(node, lines, indent, path_map)
       render_tree(node.children[item.name], lines, indent .. "  ", path_map)
     else
       lines[#lines + 1] = indent .. "  " .. item.name
-      path_map[#lines]  = item.path
+      path_map[#lines] = item.path
     end
   end
 end
@@ -83,12 +85,12 @@ function M.open_workspace_explorer()
 
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(buf, EXPLORER_NAME)
-  vim.bo[buf].buftype    = "nofile"
-  vim.bo[buf].bufhidden  = "wipe"
-  vim.bo[buf].swapfile   = false
-  vim.bo[buf].filetype   = "live_share_workspace"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = "live_share_workspace"
 
-  local lines    = { "  " .. root_name .. "/", "" }
+  local lines = { "  " .. root_name .. "/", "" }
   local path_map = {}
 
   local tree = build_tree(files)
@@ -117,19 +119,17 @@ function M.open_workspace_explorer()
   end
 
   vim.keymap.set("n", "<CR>", open_file_at_cursor, opts)
-  vim.keymap.set("n", "o",    open_file_at_cursor, opts)
-  vim.keymap.set("n", "q",    "<cmd>close<CR>",    opts)
+  vim.keymap.set("n", "o", open_file_at_cursor, opts)
+  vim.keymap.set("n", "q", "<cmd>close<CR>", opts)
   vim.keymap.set("n", "R", function()
     vim.cmd("close")
     M.open_workspace_explorer()
   end, opts)
   vim.keymap.set("n", "?", function()
     vim.notify(
-      "live-share workspace:\n"
-      .. "  <CR> / o  open file\n"
-      .. "  q         close\n"
-      .. "  R         refresh",
-      vim.log.levels.INFO)
+      "live-share workspace:\n" .. "  <CR> / o  open file\n" .. "  q         close\n" .. "  R         refresh",
+      vim.log.levels.INFO
+    )
   end, opts)
 end
 
@@ -139,7 +139,7 @@ end
 
 function M.show_peers()
   local presence = require("live-share.presence")
-  local session  = require("live-share.session")
+  local session = require("live-share.session")
 
   if not session.active() then
     vim.notify("live-share: no active session", vim.log.levels.WARN)
@@ -149,7 +149,7 @@ function M.show_peers()
   local peers = presence.get_all()
   local g_role = require("live-share.guest").get_role and require("live-share.guest").get_role() or nil
   local role_suffix = (g_role == "ro") and " [read-only]" or ""
-  local role  = session.role == "host" and "host" or ("guest #" .. tostring(session.peer_id) .. role_suffix)
+  local role = session.role == "host" and "host" or ("guest #" .. tostring(session.peer_id) .. role_suffix)
 
   local lines = {
     "  Live Share — Peers",
@@ -164,10 +164,12 @@ function M.show_peers()
     for _, p in ipairs(peers) do
       local loc = p.active_path or "(unknown file)"
       local pos = p.lnum and ("  L" .. (p.lnum + 1)) or ""
-      local ro  = ""
+      local ro = ""
       if p.active_path then
         local b = require("live-share.buffer_registry").get_buf(p.active_path)
-        if b and vim.b[b] and vim.b[b].live_share_readonly then ro = " [ro]" end
+        if b and vim.b[b] and vim.b[b].live_share_readonly then
+          ro = " [ro]"
+        end
       end
       lines[#lines + 1] = "  • " .. p.name .. "  →  " .. loc .. pos .. ro
     end
@@ -177,28 +179,30 @@ function M.show_peers()
   lines[#lines + 1] = "  [q / <Esc> to close]"
 
   local w = 0
-  for _, l in ipairs(lines) do w = math.max(w, #l + 2) end
+  for _, l in ipairs(lines) do
+    w = math.max(w, #l + 2)
+  end
   local h = #lines
 
   local fbuf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(fbuf, 0, -1, false, lines)
   vim.bo[fbuf].modifiable = false
-  vim.bo[fbuf].bufhidden  = "wipe"
+  vim.bo[fbuf].bufhidden = "wipe"
 
   vim.api.nvim_open_win(fbuf, true, {
     relative = "editor",
-    width    = math.max(w, 42),
-    height   = h,
-    row      = math.floor((vim.o.lines   - h) / 2),
-    col      = math.floor((vim.o.columns - w) / 2),
-    style    = "minimal",
-    border   = "rounded",
-    title    = " Peers ",
+    width = math.max(w, 42),
+    height = h,
+    row = math.floor((vim.o.lines - h) / 2),
+    col = math.floor((vim.o.columns - w) / 2),
+    style = "minimal",
+    border = "rounded",
+    title = " Peers ",
     title_pos = "center",
   })
 
   local fopts = { noremap = true, silent = true, buffer = fbuf }
-  vim.keymap.set("n", "q",     "<cmd>close<CR>", fopts)
+  vim.keymap.set("n", "q", "<cmd>close<CR>", fopts)
   vim.keymap.set("n", "<Esc>", "<cmd>close<CR>", fopts)
 end
 

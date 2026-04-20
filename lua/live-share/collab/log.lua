@@ -5,7 +5,9 @@ local M = {}
 M.enabled = false
 
 function M.dbg(prefix, msg)
-  if not M.enabled then return end
+  if not M.enabled then
+    return
+  end
   vim.schedule(function()
     vim.notify("[live-share " .. prefix .. "] " .. msg, vim.log.levels.INFO)
   end)

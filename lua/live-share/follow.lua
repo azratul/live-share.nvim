@@ -7,7 +7,7 @@
 local M = {}
 
 local followed_peer = nil
-local on_follow     = nil   -- fn(path, lnum, col) — executes the actual buffer switch
+local on_follow = nil -- fn(path, lnum, col) — executes the actual buffer switch
 
 -- Set the callback that executes the actual buffer switch.
 -- lnum and col may be nil (only path is required).
@@ -52,7 +52,7 @@ end
 
 function M.reset()
   followed_peer = nil
-  on_follow     = nil
+  on_follow = nil
 end
 
 return M

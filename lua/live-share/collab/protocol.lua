@@ -14,21 +14,29 @@ M.VERSION = 3
 
 function M.encode(msg, key)
   local payload = vim.json.encode(msg)
-  if not key then return payload end
+  if not key then
+    return payload
+  end
   local crypto = require("live-share.collab.crypto")
-  local nonce  = crypto.random_bytes(12)
+  local nonce = crypto.random_bytes(12)
   return nonce .. crypto.encrypt(payload, key, nonce)
 end
 
 function M.decode(payload, key)
   if key then
-    if #payload < 12 then return nil end
+    if #payload < 12 then
+      return nil
+    end
     local crypto = require("live-share.collab.crypto")
     payload = crypto.decrypt(payload:sub(13), key, payload:sub(1, 12))
-    if not payload then return nil end
+    if not payload then
+      return nil
+    end
   end
   local ok, msg = pcall(vim.json.decode, payload)
-  if ok and type(msg) == "table" then return msg end
+  if ok and type(msg) == "table" then
+    return msg
+  end
   return nil
 end
 

@@ -30,8 +30,7 @@ provider.register("nokey@localhost.run", {
 
 provider.register("ngrok", {
   command = function(_, port_internal, service_url)
-    return string.format("ngrok tcp %d --log stdout > %s 2>/dev/null",
-                         port_internal, service_url)
+    return string.format("ngrok tcp %d --log stdout > %s 2>/dev/null", port_internal, service_url)
   end,
   pattern = "tcp://[%w._-]+%.ngrok.io:%d+",
 })

@@ -22,7 +22,9 @@ function M.check()
   if ffi_ok then
     vim.health.ok("LuaJIT FFI available")
   else
-    vim.health.error("LuaJIT FFI not available — AES-256-GCM encryption is required; install a LuaJIT-based Neovim build")
+    vim.health.error(
+      "LuaJIT FFI not available — AES-256-GCM encryption is required; install a LuaJIT-based Neovim build"
+    )
   end
 
   -- OpenSSL libcrypto (needed for AES-GCM encryption)
@@ -32,8 +34,8 @@ function M.check()
   else
     vim.health.error(
       "OpenSSL libcrypto not found — encryption is required; "
-      .. "install libssl (e.g. apt install libssl-dev) or set openssl_lib to the full path "
-      .. "of libcrypto in your live-share.setup() call"
+        .. "install libssl (e.g. apt install libssl-dev) or set openssl_lib to the full path "
+        .. "of libcrypto in your live-share.setup() call"
     )
   end
 

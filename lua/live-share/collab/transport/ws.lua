@@ -42,14 +42,18 @@ M.new_reader = ws.new_frame_reader
 
 function M.server_handshake_response(buf)
   local hend = buf:find("\r\n\r\n", 1, true)
-  if not hend then return nil end  -- need more data
+  if not hend then
+    return nil
+  end -- need more data
 
   local headers = buf:sub(1, hend + 3)
-  local rest    = buf:sub(hend + 4)
+  local rest = buf:sub(hend + 4)
 
   -- HTTP headers are case-insensitive (RFC 7230); serveo sends "Sec-Websocket-Key"
   local ws_key = headers:match("[Ss]ec%-[Ww]eb[Ss]ocket%-[Kk]ey:%s*([^\r\n]+)")
-  if ws_key then ws_key = ws_key:match("^(.-)%s*$") end
+  if ws_key then
+    ws_key = ws_key:match("^(.-)%s*$")
+  end
   if not ws_key then
     return false, nil, "Sec-WebSocket-Key missing"
   end
@@ -69,10 +73,12 @@ end
 -- validation is intentionally skipped for simplicity, consistent with prior behaviour).
 function M.complete_client_handshake(buf)
   local hend = buf:find("\r\n\r\n", 1, true)
-  if not hend then return nil end  -- need more data
+  if not hend then
+    return nil
+  end -- need more data
 
   local headers = buf:sub(1, hend + 3)
-  local rest    = buf:sub(hend + 4)
+  local rest = buf:sub(hend + 4)
 
   if not headers:find("101") then
     return false, nil, "WS handshake failed — server replied:\n" .. headers:sub(1, 300)

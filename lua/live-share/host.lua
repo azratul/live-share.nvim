@@ -9,29 +9,31 @@ local M = {}
 
 local connection = require("live-share.collab.connection")
 local workspace = require("live-share.workspace")
-local presence  = require("live-share.presence")
-local follow    = require("live-share.follow")
-local session   = require("live-share.session")
-local crypto    = require("live-share.collab.crypto")
-local log       = require("live-share.collab.log")
-local uv        = vim.uv or vim.loop
+local presence = require("live-share.presence")
+local follow = require("live-share.follow")
+local session = require("live-share.session")
+local crypto = require("live-share.collab.crypto")
+local log = require("live-share.collab.log")
+local uv = vim.uv or vim.loop
 
-local config   = nil
-local conn     = nil
-local seq      = 0
+local config = nil
+local conn = nil
+local seq = 0
 
 -- tracked[path] = { buf_id, applying }  — Neovim buffers currently open by host
-local tracked    = {}
-local host_aug   = vim.api.nvim_create_augroup("LiveShareHost",       { clear = true })
+local tracked = {}
+local host_aug = vim.api.nvim_create_augroup("LiveShareHost", { clear = true })
 local cursor_aug = vim.api.nvim_create_augroup("LiveShareHostCursor", { clear = true })
 local cursor_timer = nil
 
-local function dbg(m) log.dbg("host", m) end
+local function dbg(m)
+  log.dbg("host", m)
+end
 
 local function get_username()
   return (config and config.username and config.username ~= "" and config.username)
-      or (vim.g.live_share_username ~= nil and vim.g.live_share_username ~= "" and vim.g.live_share_username)
-      or "host"
+    or (vim.g.live_share_username ~= nil and vim.g.live_share_username ~= "" and vim.g.live_share_username)
+    or "host"
 end
 
 -- ── Buffer tracking ───────────────────────────────────────────────────────────
@@ -40,41 +42,59 @@ local function make_path(abs)
   local root = workspace.get_root()
   if root and abs:sub(1, #root) == root then
     local rel = abs:sub(#root + 2)
-    if rel ~= "" then return rel end
+    if rel ~= "" then
+      return rel
+    end
   end
   return abs
 end
 
 local function is_shareable(b)
-  if not vim.api.nvim_buf_is_valid(b) then return false end
-  if not vim.api.nvim_buf_is_loaded(b) then return false end
-  if vim.fn.buflisted(b) == 0 then return false end
-  if vim.bo[b].buftype ~= "" then return false end
+  if not vim.api.nvim_buf_is_valid(b) then
+    return false
+  end
+  if not vim.api.nvim_buf_is_loaded(b) then
+    return false
+  end
+  if vim.fn.buflisted(b) == 0 then
+    return false
+  end
+  if vim.bo[b].buftype ~= "" then
+    return false
+  end
   return vim.api.nvim_buf_get_name(b) ~= ""
 end
 
 -- Attach to a Neovim buffer and start watching it for local edits.
 -- Returns the workspace-relative path if newly attached, nil otherwise.
 local function attach_buffer(b)
-  if not is_shareable(b) then return nil end
+  if not is_shareable(b) then
+    return nil
+  end
   local path = make_path(vim.api.nvim_buf_get_name(b))
-  if tracked[path] then return nil end  -- already tracked
+  if tracked[path] then
+    return nil
+  end -- already tracked
 
   local applying = { value = false }
   tracked[path] = { buf_id = b, applying = applying }
 
   vim.api.nvim_buf_attach(b, false, {
     on_lines = function(_, buf, _, firstline, lastline, new_lastline)
-      if applying.value then return end
-      if firstline == lastline and new_lastline == firstline then return end
+      if applying.value then
+        return
+      end
+      if firstline == lastline and new_lastline == firstline then
+        return
+      end
       seq = seq + 1
       local lines = vim.api.nvim_buf_get_lines(buf, firstline, new_lastline, false)
       conn:broadcast({
-        t     = "patch",
-        path  = path,
-        seq   = seq,
-        peer  = 0,
-        lnum  = firstline,
+        t = "patch",
+        path = path,
+        seq = seq,
+        peer = 0,
+        lnum = firstline,
         count = lastline - firstline,
         lines = lines,
       })
@@ -88,59 +108,71 @@ local function attach_buffer(b)
   -- Position and selection are captured synchronously at event time so the
   -- 100 ms delay does not cause a stale mode read.
   vim.api.nvim_create_autocmd("CursorMoved", {
-    group  = cursor_aug,
+    group = cursor_aug,
     buffer = b,
     callback = function()
-      local pos  = vim.api.nvim_win_get_cursor(0)
+      local pos = vim.api.nvim_win_get_cursor(0)
       local mode = vim.fn.mode()
-      local sel  = nil
+      local sel = nil
       if mode == "v" or mode == "V" or mode == "\22" then
         local vstart = vim.fn.getpos("v")
-        local vend   = vim.fn.getpos(".")
+        local vend = vim.fn.getpos(".")
         local sl, sc = vstart[2] - 1, vstart[3] - 1
-        local el, ec = vend[2] - 1,   vend[3] - 1
+        local el, ec = vend[2] - 1, vend[3] - 1
         if sl > el or (sl == el and sc > ec) then
           sl, sc, el, ec = el, ec, sl, sc
         end
-        if mode == "V" then sc = 0; ec = 2147483647 end
+        if mode == "V" then
+          sc = 0
+          ec = 2147483647
+        end
         sel = { sl = sl, sc = sc, el = el, ec = ec }
       end
 
-      if cursor_timer then cursor_timer:stop()
-      else cursor_timer = uv.new_timer() end
-      cursor_timer:start(100, 0, vim.schedule_wrap(function()
-        local cmsg = {
-          t    = "cursor",
-          path = path,
-          peer = 0,
-          lnum = pos[1] - 1,
-          col  = pos[2],
-          name = get_username(),
-        }
-        if sel then
-          cmsg.sel_lnum = sel.sl; cmsg.sel_col = sel.sc
-          cmsg.sel_end_lnum = sel.el; cmsg.sel_end_col = sel.ec
-        end
-        conn:broadcast(cmsg)
-      end))
+      if cursor_timer then
+        cursor_timer:stop()
+      else
+        cursor_timer = uv.new_timer()
+      end
+      cursor_timer:start(
+        100,
+        0,
+        vim.schedule_wrap(function()
+          local cmsg = {
+            t = "cursor",
+            path = path,
+            peer = 0,
+            lnum = pos[1] - 1,
+            col = pos[2],
+            name = get_username(),
+          }
+          if sel then
+            cmsg.sel_lnum = sel.sl
+            cmsg.sel_col = sel.sc
+            cmsg.sel_end_lnum = sel.el
+            cmsg.sel_end_col = sel.ec
+          end
+          conn:broadcast(cmsg)
+        end)
+      )
     end,
   })
 
   -- CursorMoved does not fire when leaving visual mode without moving the cursor
   -- (e.g. <Esc>). Send an immediate clear so remote highlights don't linger.
   vim.api.nvim_create_autocmd("ModeChanged", {
-    group    = cursor_aug,
-    buffer   = b,
+    group = cursor_aug,
+    buffer = b,
     callback = function()
       local old = vim.v.event.old_mode
       if old == "v" or old == "V" or old == "\22" then
         local pos = vim.api.nvim_win_get_cursor(0)
         conn:broadcast({
-          t    = "cursor",
+          t = "cursor",
           path = path,
           peer = 0,
           lnum = pos[1] - 1,
-          col  = pos[2],
+          col = pos[2],
           name = get_username(),
         })
       end
@@ -178,22 +210,22 @@ local function on_message(msg, from_peer)
             conn:set_role(from_peer, ro and "ro" or "rw")
 
             conn:send(from_peer, {
-              t                = "hello",
+              t = "hello",
               protocol_version = require("live-share.collab.protocol").VERSION,
-              sid              = session.id,
-              peer_id          = from_peer,
-              host_name        = get_username(),
-              role             = ro and "ro" or "rw",
-              required_caps    = { "workspace" },
-              optional_caps    = { "terminal", "cursor", "follow" },
+              sid = session.id,
+              peer_id = from_peer,
+              host_name = get_username(),
+              role = ro and "ro" or "rw",
+              required_caps = { "workspace" },
+              optional_caps = { "terminal", "cursor", "follow" },
             })
 
             -- Workspace file list (flat).
             local files = workspace.scan()
             conn:send(from_peer, {
-              t         = "workspace_info",
+              t = "workspace_info",
               root_name = vim.fn.fnamemodify(workspace.get_root() or ".", ":t"),
-              files     = files,
+              files = files,
             })
 
             -- Snapshot of all currently open (tracked) buffers.
@@ -201,7 +233,7 @@ local function on_message(msg, from_peer)
             for path, t in pairs(tracked) do
               if vim.api.nvim_buf_is_valid(t.buf_id) then
                 open_list[#open_list + 1] = {
-                  path  = path,
+                  path = path,
                   lines = vim.api.nvim_buf_get_lines(t.buf_id, 0, -1, false),
                 }
               end
@@ -234,7 +266,9 @@ local function on_message(msg, from_peer)
   -- ── file_request ──────────────────────────────────────────────────────────
   elseif msg.t == "file_request" then
     local path = msg.path
-    if not path then return end
+    if not path then
+      return
+    end
 
     local lines
     local t = tracked[path]
@@ -246,37 +280,44 @@ local function on_message(msg, from_peer)
 
     if not lines then
       conn:send(from_peer, {
-        t       = "error",
-        code    = "file_not_found",
+        t = "error",
+        code = "file_not_found",
         message = "file not found in workspace: " .. path,
-        req_id  = msg.req_id,
+        req_id = msg.req_id,
       })
       return
     end
 
     conn:send(from_peer, {
-      t        = "file_response",
-      path     = path,
-      lines    = lines,
+      t = "file_response",
+      path = path,
+      lines = lines,
       readonly = false,
-      req_id   = msg.req_id,
+      req_id = msg.req_id,
     })
 
   -- ── patch ─────────────────────────────────────────────────────────────────
   elseif msg.t == "patch" then
     local path = msg.path
-    if not path then return end
+    if not path then
+      return
+    end
 
     seq = seq + 1
     local stamped = {
-      t     = "patch", path = path, seq = seq, peer = from_peer,
-      lnum  = msg.lnum, count = msg.count, lines = msg.lines,
+      t = "patch",
+      path = path,
+      seq = seq,
+      peer = from_peer,
+      lnum = msg.lnum,
+      count = msg.count,
+      lines = msg.lines,
     }
 
     local t = tracked[path]
     if t and vim.api.nvim_buf_is_valid(t.buf_id) then
       local end_line = msg.count == -1 and -1 or (msg.lnum + msg.count)
-      local lines    = type(msg.lines) == "table" and msg.lines or {}
+      local lines = type(msg.lines) == "table" and msg.lines or {}
       t.applying.value = true
       vim.api.nvim_buf_set_lines(t.buf_id, msg.lnum, end_line, false, lines)
       t.applying.value = false
@@ -292,17 +333,27 @@ local function on_message(msg, from_peer)
     -- Render the guest's cursor in the host's own Neovim buffer.
     local entry = msg.path and tracked[msg.path]
     if entry and vim.api.nvim_buf_is_valid(entry.buf_id) then
-      local sel = msg.sel_lnum and {
-        lnum = msg.sel_lnum, col = msg.sel_col,
-        end_lnum = msg.sel_end_lnum, end_col = msg.sel_end_col,
-      } or nil
+      local sel = msg.sel_lnum
+          and {
+            lnum = msg.sel_lnum,
+            col = msg.sel_col,
+            end_lnum = msg.sel_end_lnum,
+            end_col = msg.sel_end_col,
+          }
+        or nil
       presence.update_cursor(entry.buf_id, from_peer, msg.lnum, msg.col, msg.name, msg.path, sel)
     end
     conn:broadcast({
-      t    = "cursor", path = msg.path, peer = from_peer,
-      lnum = msg.lnum, col  = msg.col,  name = msg.name,
-      sel_lnum = msg.sel_lnum, sel_col = msg.sel_col,
-      sel_end_lnum = msg.sel_end_lnum, sel_end_col = msg.sel_end_col,
+      t = "cursor",
+      path = msg.path,
+      peer = from_peer,
+      lnum = msg.lnum,
+      col = msg.col,
+      name = msg.name,
+      sel_lnum = msg.sel_lnum,
+      sel_col = msg.sel_col,
+      sel_end_lnum = msg.sel_end_lnum,
+      sel_end_col = msg.sel_end_col,
     }, from_peer)
 
   -- ── focus ─────────────────────────────────────────────────────────────────
@@ -312,7 +363,10 @@ local function on_message(msg, from_peer)
     presence.update_peer(from_peer, label)
     follow.maybe_follow(msg.path, nil, nil, from_peer)
     conn:broadcast({
-      t = "focus", path = msg.path, peer = from_peer, name = msg.name,
+      t = "focus",
+      path = msg.path,
+      peer = from_peer,
+      name = msg.name,
     }, from_peer)
 
   -- ── bye ───────────────────────────────────────────────────────────────────
@@ -335,18 +389,17 @@ end
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.setup(cfg)
-  config      = cfg
+  config = cfg
   log.enabled = cfg and cfg.debug or false
 end
 
 function M.start(port)
-  local root = (config and config.workspace_root and config.workspace_root ~= "")
-      and config.workspace_root
-      or vim.fn.getcwd()
+  local root = (config and config.workspace_root and config.workspace_root ~= "") and config.workspace_root
+    or vim.fn.getcwd()
   workspace.set_root(root)
-  session.id   = M.random_sid()
+  session.id = M.random_sid()
   session.role = "host"
-  seq          = 0
+  seq = 0
 
   if crypto.available then
     session.key = crypto.generate_key()
@@ -358,9 +411,9 @@ function M.start(port)
   local p
   if config and config.transport == "punch" then
     local ok_conn, punch_listener = pcall(connection.new_punch_listener, {
-      key    = session.key,
+      key = session.key,
       on_msg = on_message,
-      stun   = config.stun,
+      stun = config.stun,
     })
     if not ok_conn then
       vim.notify("live-share: punch transport unavailable: " .. tostring(punch_listener), vim.log.levels.ERROR)
@@ -380,7 +433,9 @@ function M.start(port)
     end
   end
 
-  require("live-share.shared_terminal").setup("host", function(msg) conn:broadcast(msg) end)
+  require("live-share.shared_terminal").setup("host", function(msg)
+    conn:broadcast(msg)
+  end)
 
   -- Follow mode: when host follows a guest, switch to their active tracked buffer.
   follow.setup(function(path, lnum, col)
@@ -402,7 +457,7 @@ function M.start(port)
 
   -- New files opened by the host during the session.
   vim.api.nvim_create_autocmd("BufAdd", {
-    group    = host_aug,
+    group = host_aug,
     callback = function(ev)
       local b = ev.buf
       vim.schedule(function()
@@ -417,7 +472,7 @@ function M.start(port)
 
   -- Files closed by the host.
   vim.api.nvim_create_autocmd("BufDelete", {
-    group    = host_aug,
+    group = host_aug,
     callback = function(ev)
       for path, t in pairs(tracked) do
         if t.buf_id == ev.buf then
@@ -434,7 +489,7 @@ function M.start(port)
 
   -- Focus events: host switched active buffer.
   vim.api.nvim_create_autocmd("BufEnter", {
-    group    = host_aug,
+    group = host_aug,
     callback = function(ev)
       vim.schedule(function()
         local path = make_path(vim.api.nvim_buf_get_name(ev.buf))
@@ -447,7 +502,7 @@ function M.start(port)
 
   -- Save events.
   vim.api.nvim_create_autocmd("BufWritePost", {
-    group    = host_aug,
+    group = host_aug,
     callback = function(ev)
       local path = make_path(vim.api.nvim_buf_get_name(ev.buf))
       if tracked[path] then
@@ -458,8 +513,7 @@ function M.start(port)
 
   -- Status message.
   p = p or (conn and conn.signaling_port) or "0"
-  vim.api.nvim_out_write(
-    "live-share: hosting '" .. vim.fn.fnamemodify(root, ":t") .. "' on port " .. p .. "\n")
+  vim.api.nvim_out_write("live-share: hosting '" .. vim.fn.fnamemodify(root, ":t") .. "' on port " .. p .. "\n")
   return true
 end
 
@@ -474,9 +528,12 @@ function M.stop()
   presence.clear_all()
   follow.reset()
   require("live-share.shared_terminal").stop()
-  if conn then conn:stop(); conn = nil end
+  if conn then
+    conn:stop()
+    conn = nil
+  end
   tracked = {}
-  seq     = 0
+  seq = 0
   workspace.set_root(nil)
   session.reset()
 end
@@ -488,7 +545,9 @@ end
 
 -- Exposed for tunnel.lua: appends the encryption key to the share URL.
 function M.get_key_fragment()
-  if not session.key then return "" end
+  if not session.key then
+    return ""
+  end
   return "#key=" .. crypto.b64url_encode(session.key)
 end
 
@@ -500,7 +559,9 @@ end
 function M.random_sid()
   math.randomseed(os.time())
   local t = {}
-  for i = 1, 16 do t[i] = string.format("%02x", math.random(0, 255)) end
+  for i = 1, 16 do
+    t[i] = string.format("%02x", math.random(0, 255))
+  end
   return table.concat(t)
 end
 

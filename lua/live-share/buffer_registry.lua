@@ -15,7 +15,7 @@ local M = {}
 -- by_path[path]   = { buf_id, applying }
 -- by_buf[buf_id]  = path   (reverse index)
 local by_path = {}
-local by_buf  = {}
+local by_buf = {}
 
 -- Called when a tracked buffer changes locally: fn(path, patch_msg)
 local on_change_cb = nil
@@ -28,14 +28,18 @@ end
 local function watch(path, b, applying)
   vim.api.nvim_buf_attach(b, false, {
     on_lines = function(_, buf, _, firstline, lastline, new_lastline)
-      if applying.value then return end
-      if firstline == lastline and new_lastline == firstline then return end
+      if applying.value then
+        return
+      end
+      if firstline == lastline and new_lastline == firstline then
+        return
+      end
       if on_change_cb then
         local lines = vim.api.nvim_buf_get_lines(buf, firstline, new_lastline, false)
         on_change_cb(path, {
-          t     = "patch",
-          path  = path,
-          lnum  = firstline,
+          t = "patch",
+          path = path,
+          lnum = firstline,
           count = lastline - firstline,
           lines = lines,
         })
@@ -44,7 +48,7 @@ local function watch(path, b, applying)
     on_detach = function()
       if by_path[path] and by_path[path].buf_id == b then
         by_path[path] = nil
-        by_buf[b]     = nil
+        by_buf[b] = nil
       end
     end,
   })
@@ -67,9 +71,9 @@ function M.open(path, lines, session_id, readonly)
 
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(b, "liveshare://" .. (session_id or "session") .. "/" .. path)
-  vim.bo[b].buftype    = "nofile"
-  vim.bo[b].bufhidden  = "hide"
-  vim.bo[b].swapfile   = false
+  vim.bo[b].buftype = "nofile"
+  vim.bo[b].bufhidden = "hide"
+  vim.bo[b].swapfile = false
   vim.bo[b].modifiable = not readonly
 
   -- Trigger filetype detection for syntax highlighting.
@@ -88,7 +92,7 @@ function M.open(path, lines, session_id, readonly)
 
   -- Intercept :w
   vim.api.nvim_create_autocmd("BufWriteCmd", {
-    buffer   = b,
+    buffer = b,
     callback = function()
       vim.notify("live-share: '" .. path .. "' syncs automatically — no local write needed", vim.log.levels.INFO)
     end,
@@ -99,7 +103,7 @@ function M.open(path, lines, session_id, readonly)
   if readonly then
     local ro_notified = false
     vim.api.nvim_create_autocmd("InsertEnter", {
-      buffer   = b,
+      buffer = b,
       callback = function()
         vim.schedule(function()
           vim.cmd("stopinsert")
@@ -113,13 +117,13 @@ function M.open(path, lines, session_id, readonly)
   end
 
   -- Buffer variables for statusline / external integrations.
-  vim.b[b].live_share_remote   = true
-  vim.b[b].live_share_path     = path
+  vim.b[b].live_share_remote = true
+  vim.b[b].live_share_path = path
   vim.b[b].live_share_readonly = readonly
 
   local applying = { value = false }
   by_path[path] = { buf_id = b, applying = applying }
-  by_buf[b]     = path
+  by_buf[b] = path
 
   if not readonly then
     watch(path, b, applying)
@@ -131,8 +135,10 @@ end
 -- Upgrade a previously read-only buffer to editable (host opened the file).
 function M.set_editable(path)
   local e = by_path[path]
-  if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then return end
-  vim.bo[e.buf_id].modifiable       = true
+  if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then
+    return
+  end
+  vim.bo[e.buf_id].modifiable = true
   vim.b[e.buf_id].live_share_readonly = false
   watch(path, e.buf_id, e.applying)
 end
@@ -141,16 +147,18 @@ end
 -- patch = { lnum, count, lines }; count == -1 replaces the entire buffer.
 function M.apply(path, patch)
   local e = by_path[path]
-  if not e then return end
+  if not e then
+    return
+  end
   local b = e.buf_id
   if not vim.api.nvim_buf_is_valid(b) then
     by_path[path] = nil
-    by_buf[b]     = nil
+    by_buf[b] = nil
     return
   end
   local end_line = patch.count == -1 and -1 or (patch.lnum + patch.count)
-  local lines    = type(patch.lines) == "table" and patch.lines or {}
-  local was_mod  = vim.bo[b].modifiable
+  local lines = type(patch.lines) == "table" and patch.lines or {}
+  local was_mod = vim.bo[b].modifiable
   vim.bo[b].modifiable = true
   e.applying.value = true
   vim.api.nvim_buf_set_lines(b, patch.lnum, end_line, false, lines)
@@ -160,7 +168,9 @@ end
 
 function M.get_lines(path)
   local e = by_path[path]
-  if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then return {} end
+  if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then
+    return {}
+  end
   return vim.api.nvim_buf_get_lines(e.buf_id, 0, -1, false)
 end
 
@@ -175,16 +185,20 @@ end
 
 function M.list_paths()
   local result = {}
-  for path in pairs(by_path) do result[#result + 1] = path end
+  for path in pairs(by_path) do
+    result[#result + 1] = path
+  end
   return result
 end
 
 function M.close(path)
   local e = by_path[path]
-  if not e then return end
+  if not e then
+    return
+  end
   local b = e.buf_id
   by_path[path] = nil
-  by_buf[b]     = nil
+  by_buf[b] = nil
   if vim.api.nvim_buf_is_valid(b) then
     pcall(vim.api.nvim_buf_delete, b, { force = true })
   end
@@ -192,8 +206,12 @@ end
 
 function M.close_all()
   local paths = {}
-  for path in pairs(by_path) do paths[#paths + 1] = path end
-  for _, path in ipairs(paths) do M.close(path) end
+  for path in pairs(by_path) do
+    paths[#paths + 1] = path
+  end
+  for _, path in ipairs(paths) do
+    M.close(path)
+  end
 end
 
 return M

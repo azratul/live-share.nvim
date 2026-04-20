@@ -1,4 +1,6 @@
-if vim.g.loaded_liveshare then return end
+if vim.g.loaded_liveshare then
+  return
+end
 vim.g.loaded_liveshare = true
 
 local save_cpo = vim.o.cpo
@@ -12,7 +14,7 @@ cmd("LiveShareHostStart", function(opts)
   require("live-share.commands").host_start(port)
 end, {
   nargs = "?",
-  desc  = "Start hosting a Live Share session",
+  desc = "Start hosting a Live Share session",
 })
 
 -- :LiveShareJoin <url> [port]
@@ -21,7 +23,7 @@ cmd("LiveShareJoin", function(opts)
   require("live-share.commands").join(args[1], tonumber(args[2]))
 end, {
   nargs = "+",
-  desc  = "Join a Live Share session by URL",
+  desc = "Join a Live Share session by URL",
 })
 
 -- :LiveShareStop
@@ -36,11 +38,13 @@ cmd("LiveShareFollow", function(opts)
   local arg = opts.args ~= "" and opts.args or nil
   require("live-share.commands").follow(arg)
 end, {
-  nargs    = "?",
-  desc     = "Follow a peer: no arg = host, or :LiveShareFollow <peer_id>",
+  nargs = "?",
+  desc = "Follow a peer: no arg = host, or :LiveShareFollow <peer_id>",
   complete = function(arg_lead)
     local ok, presence = pcall(require, "live-share.presence")
-    if not ok then return {} end
+    if not ok then
+      return {}
+    end
     local result = {}
     for _, p in ipairs(presence.get_all()) do
       local s = tostring(p.peer_id)
@@ -77,11 +81,13 @@ end, {
 cmd("LiveShareOpen", function(opts)
   require("live-share.commands").open_file(opts.args)
 end, {
-  nargs    = 1,
-  desc     = "Open a remote file from the workspace (guest only)",
+  nargs = 1,
+  desc = "Open a remote file from the workspace (guest only)",
   complete = function(arg_lead)
     local ok, commands = pcall(require, "live-share.commands")
-    if not ok then return {} end
+    if not ok then
+      return {}
+    end
     return commands.complete_workspace_path(arg_lead)
   end,
 })
@@ -100,7 +106,7 @@ cmd("LiveShareServer", function(opts)
   require("live-share.commands").host_start(port)
 end, {
   nargs = "?",
-  desc  = "Deprecated alias for :LiveShareHostStart",
+  desc = "Deprecated alias for :LiveShareHostStart",
 })
 
 vim.o.cpo = save_cpo
