@@ -39,7 +39,14 @@ Previous versions relied on [jbyuki/instant.nvim](https://github.com/jbyuki/inst
 - **The project appears abandoned.** `instant.nvim` has not received updates in four years and no longer seems actively maintained, which makes relying on it risky.
 - **Encryption was a hard requirement.** The plugin routes traffic through third-party reverse SSH tunneling services (serveo.net, localhost.run, ngrok). Sending plaintext editor content through those servers is not acceptable, and instant.nvim offered no path to support end-to-end encryption.
 
-Replacing `instant.nvim` required reimplementing the entire collaboration layer from scratch: WebSocket transport, binary framing, buffer sync, cursor tracking, and AES-256-GCM crypto via LuaJIT FFI. Given the scope and complexity of that rewrite, it was carried out with the assistance of **AI vibecoding tools**.
+Replacing `instant.nvim` meant reimplementing the entire collaboration layer from scratch. The key design decisions were:
+
+- **WebSocket over plain TCP** — required because HTTP tunnel providers (serveo, localhost.run) act as HTTP reverse proxies and reject raw TCP. The server auto-detects WebSocket vs. raw TCP from the first 4 bytes of each connection, keeping both modes behind the same port.
+- **AES-256-GCM via LuaJIT FFI** — chosen to avoid a Lua native extension dependency while still getting authenticated encryption. Each message carries a fresh 12-byte nonce; the session key never leaves the URL fragment.
+- **Line-level last-write-wins with host-assigned sequence numbers** — deliberately simple. A CRDT would handle concurrent edits more gracefully, but adds significant complexity for a use case where one participant is almost always the authority. The host's monotonic `seq` counter is sufficient for the expected collaboration patterns.
+- **No external plugin dependencies** — the WebSocket handshake (including SHA-1 for `Sec-WebSocket-Accept`) is implemented in pure Lua to avoid pulling in a third-party library for a single handshake operation.
+
+The rewrite was carried out with AI assistance as a development tool, with all architectural decisions, protocol design, and code review done by the maintainer.
 
 ### Requirements
 
