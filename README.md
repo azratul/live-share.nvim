@@ -1,22 +1,11 @@
 # Live Share Plugin for Neovim
 
-[![total lines](https://tokei.rs/b1/github/azratul/live-share.nvim)](https://github.com/XAMPPRocky/tokei)
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/azratul/live-share.nvim)
 ![GitHub repo size](https://img.shields.io/github/repo-size/azratul/live-share.nvim)
 
 <a href="https://dotfyle.com/plugins/azratul/live-share.nvim">
 	<img src="https://dotfyle.com/plugins/azratul/live-share.nvim/shield?style=flat-square" />
 </a>
-
-✨ v2.1.0 – P2P Transport via punch.lua
-
-> ⚠️ **Heads up:** If the latest commit causes any issues, please [open an issue](https://github.com/azratul/live-share.nvim/issues).
-> Meanwhile, you can use the last stable version by checking out the [`v1.1.0`](https://github.com/azratul/live-share.nvim/releases/tag/v2.0.0) tag:
-
-```lua
--- lazy.nvim
-{ "azratul/live-share.nvim", version = "v1.1.0" }
-```
 
 ## Overview
 
@@ -74,12 +63,12 @@ A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel b
 
 The P2P channel is encrypted with AES-256-GCM using the same session key that travels in the URL fragment.
 
-To use P2P transport, install punch and configure a TCP-level tunnel (bore or ngrok — HTTP reverse proxies like serveo/localhost.run are not compatible with the signaling phase):
+To use P2P transport, install punch and configure any tunnel service. The tunnel is only used during the ~5-second HTTP signaling phase, so HTTP reverse proxies (serveo, localhost.run) work just as well as TCP-level tunnels (bore, ngrok):
 
 ```lua
 require("live-share").setup({
   transport = "punch",
-  service   = "bore",   -- or "ngrok"
+  service   = "bore",   -- or "ngrok", "serveo.net", "nokey@localhost.run"
   stun      = { "stun.l.google.com:19302", "stun1.l.google.com:19302" },
   username  = "your-name",
 })
@@ -134,7 +123,7 @@ Basic installation (no P2P transport):
   config = function()
     require("live-share").setup({
       transport = "punch",
-      service   = "bore",   -- or "ngrok"
+      service   = "bore",   -- or "ngrok", "serveo.net", "nokey@localhost.run"
       username  = "your-name",
     })
   end
@@ -155,7 +144,7 @@ Basic installation (no P2P transport):
   config = function()
     require("live-share").setup({
       transport = "punch",
-      service   = "bore",   -- or "ngrok"
+      service   = "bore",   -- or "ngrok", "serveo.net", "nokey@localhost.run"
       username  = "your-name",
     })
   end
@@ -257,7 +246,7 @@ For a detailed technical specification of the communication layer, message schem
 
 - **Transport**: Two modes available:
   - `ws` (default): WebSocket over TCP. Auto-detects WebSocket vs. raw TCP from the first 4 bytes — WebSocket for HTTP tunnel providers (serveo, localhost.run), raw length-prefixed TCP for direct connections and ngrok.
-  - `punch`: Direct P2P UDP via NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel exposes only the HTTP signaling server (~5 s); all subsequent traffic flows peer-to-peer. Requires a TCP-level tunnel (bore, ngrok).
+  - `punch`: Direct P2P UDP via NAT hole-punching (punch.lua => `luarocks intall punch` or `luarocks install --local punch`). The tunnel exposes only the HTTP signaling server (~5 s); all subsequent traffic flows peer-to-peer. Compatible with any tunnel provider (bore, ngrok, serveo, localhost.run).
 - **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message. For `ws`, encryption is applied at the protocol layer; for `punch`, the channel layer handles it. Required — sessions will not start if OpenSSL is unavailable.
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
 - **Shared terminal**: PTY I/O streamed over the same encrypted connection as all other session events.
