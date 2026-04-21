@@ -65,7 +65,7 @@ nvim --headless \
   -c "PlenaryBustedFile tests/protocol/protocol_spec.lua"
 ```
 
-There is no automated test coverage for network behaviour or Neovim UI interactions — those require two running Neovim instances and must be tested manually.
+Network behaviour (TCP connect, WebSocket handshake, broadcast, AES-256-GCM encryption end-to-end) is covered by the integration tests in `tests/integration/`. Neovim UI interactions (remote cursor extmarks, `vim.ui.select` approval prompts, buffer rendering) still require two running Neovim instances and must be tested manually.
 
 ## Manual testing
 
