@@ -117,7 +117,10 @@ function M.new_punch_listener(opts)
     dbg("preparing for guest " .. peer_id)
 
     -- Create session; key is used by the channel for AES-256-GCM encryption.
-    local s = punch.session.new({ stun = stun, key = session_key })
+    -- Pass relay URL so the session can fall back through the signaling server's
+    -- /relay broker when UDP hole-punching fails (e.g. symmetric / double NAT).
+    local relay_url = sig_srv and (sig_srv.url:gsub("^http://", "ws://") .. "/relay") or nil
+    local s = punch.session.new({ stun = stun, key = session_key, relay = relay_url })
 
     s:on("error", function(e)
       local msg = "peer " .. peer_id .. " punch error: " .. tostring(e and e.message or e)
@@ -305,52 +308,10 @@ function M.new_punch_connector(opts)
   local on_message = opts.on_msg
   local stun = opts.stun or "stun.l.google.com:19302"
 
-  local s = punch.session.new({ stun = stun, key = session_key })
+  -- `s` is set inside connect() once the signaling URL is known (needed to
+  -- derive the relay URL for the fallback broker on the same server).
+  local s = nil
   local self = {}
-
-  s:on("error", function(e)
-    local msg = "connector punch error: " .. tostring(e and e.message or e)
-    dbg(msg)
-    vim.schedule(function()
-      vim.notify("live-share: " .. msg, vim.log.levels.ERROR)
-    end)
-  end)
-
-  s:on("message", function(data)
-    -- We pass nil as the key because punch.lua v0.2.0 already provides
-    -- E2E encryption via peer_key.
-    local msg = protocol.decode(data, nil)
-    if not msg then
-      return
-    end
-    vim.schedule(function()
-      if on_message then
-        on_message(msg)
-      end
-    end)
-  end)
-
-  s:on("close", function(reason)
-    dbg("connector: punch closed: " .. tostring(reason))
-    vim.schedule(function()
-      if reason and reason ~= "closed by local peer" then
-        vim.notify("live-share: P2P connection closed: " .. tostring(reason), vim.log.levels.WARN)
-      end
-      if on_message then
-        on_message({ t = "bye", peer = 0 })
-      end
-    end)
-  end)
-
-  s:on("open", function()
-    dbg("connector: punch open")
-    vim.schedule(function()
-      vim.notify("live-share: connected (P2P)", vim.log.levels.INFO)
-    end)
-    -- We NO LONGER send an over-the-wire "connect" message because the host
-    -- generates one locally when the punch session opens. This avoids race
-    -- conditions and double-prompting.
-  end)
 
   -- connect(signaling_url, _port, on_error)
   -- Gathers local candidates and exchanges descriptions via the signaling server.
@@ -358,6 +319,55 @@ function M.new_punch_connector(opts)
   -- both sides have each other's description.
   function self:connect(signaling_url, _port, on_error)
     dbg("connecting via signaling URL: " .. tostring(signaling_url))
+
+    -- Derive relay URL from the signaling URL (http → ws, append /relay).
+    local relay_url = signaling_url:gsub("^http://", "ws://") .. "/relay"
+
+    s = punch.session.new({ stun = stun, key = session_key, relay = relay_url })
+
+    s:on("error", function(e)
+      local msg = "connector punch error: " .. tostring(e and e.message or e)
+      dbg(msg)
+      vim.schedule(function()
+        vim.notify("live-share: " .. msg, vim.log.levels.ERROR)
+      end)
+    end)
+
+    s:on("message", function(data)
+      -- We pass nil as the key because punch.lua already provides
+      -- E2E encryption via the channel layer.
+      local msg = protocol.decode(data, nil)
+      if not msg then
+        return
+      end
+      vim.schedule(function()
+        if on_message then
+          on_message(msg)
+        end
+      end)
+    end)
+
+    s:on("close", function(reason)
+      dbg("connector: punch closed: " .. tostring(reason))
+      vim.schedule(function()
+        if reason and reason ~= "closed by local peer" then
+          vim.notify("live-share: P2P connection closed: " .. tostring(reason), vim.log.levels.WARN)
+        end
+        if on_message then
+          on_message({ t = "bye", peer = 0 })
+        end
+      end)
+    end)
+
+    s:on("open", function()
+      dbg("connector: punch open")
+      vim.schedule(function()
+        vim.notify("live-share: connected (P2P)", vim.log.levels.INFO)
+      end)
+      -- We NO LONGER send an over-the-wire "connect" message because the host
+      -- generates one locally when the punch session opens. This avoids race
+      -- conditions and double-prompting.
+    end)
 
     local my_desc = nil
     local host_desc = nil
@@ -424,8 +434,8 @@ function M.new_punch_connector(opts)
   end
 
   function self:send(msg)
-    if s.state ~= "open" then
-      dbg("connector send: session not open (state=" .. s.state .. ")")
+    if not s or s.state ~= "open" then
+      dbg("connector send: session not open (state=" .. tostring(s and s.state) .. ")")
       return
     end
     local payload = protocol.encode(msg, nil)
@@ -433,7 +443,9 @@ function M.new_punch_connector(opts)
   end
 
   function self:stop()
-    s:close()
+    if s then
+      s:close()
+    end
   end
 
   return self
