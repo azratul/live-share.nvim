@@ -207,3 +207,82 @@ describe("Encrypted mode integration", function()
     assert.equals("enc-ws-sid", client_received.sid)
   end)
 end)
+
+-- ── Broadcast ─────────────────────────────────────────────────────────────────
+describe("Broadcast integration", function()
+  local peers = {}
+
+  after_each(function()
+    for _, p in ipairs(peers) do p:stop() end
+    peers = {}
+    server.stop()
+  end)
+
+  it("broadcast reaches two simultaneous TCP peers", function()
+    local connected = 0
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        connected = connected + 1
+        server.approve(peer_id)
+        if connected == 2 then
+          server.broadcast({ t = "patch", path = "a.lua", lnum = 0, count = 0, lines = { "broadcast" } })
+        end
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 4, nil), "server failed to bind")
+
+    local p1 = raw_tcp_peer(BASE_PORT + 4, nil)
+    local p2 = raw_tcp_peer(BASE_PORT + 4, nil)
+    table.insert(peers, p1)
+    table.insert(peers, p2)
+
+    local function got_patch(peer)
+      for _, m in ipairs(peer.msgs) do
+        if m.t == "patch" then return true end
+      end
+      return false
+    end
+
+    assert.is_true(
+      wait_for(function() return got_patch(p1) and got_patch(p2) end),
+      "timed out — not all peers received the broadcast"
+    )
+    assert.equals("broadcast", p1.msgs[#p1.msgs].lines[1])
+    assert.equals("broadcast", p2.msgs[#p2.msgs].lines[1])
+  end)
+
+  it("broadcast reaches a TCP peer and a WS peer simultaneously", function()
+    local connected = 0
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        connected = connected + 1
+        server.approve(peer_id)
+        if connected == 2 then
+          server.broadcast({ t = "patch", path = "b.lua", lnum = 0, count = 0, lines = { "mixed-broadcast" } })
+        end
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 5, nil), "server failed to bind")
+
+    local tcp_peer = raw_tcp_peer(BASE_PORT + 5, nil)
+    local ws_peer = raw_ws_peer(BASE_PORT + 5, nil)
+    table.insert(peers, tcp_peer)
+    table.insert(peers, ws_peer)
+
+    local function got_patch(peer)
+      for _, m in ipairs(peer.msgs) do
+        if m.t == "patch" then return true end
+      end
+      return false
+    end
+
+    assert.is_true(
+      wait_for(function() return got_patch(tcp_peer) and got_patch(ws_peer) end),
+      "timed out — TCP+WS broadcast did not reach both peers"
+    )
+    assert.equals("mixed-broadcast", tcp_peer.msgs[#tcp_peer.msgs].lines[1])
+    assert.equals("mixed-broadcast", ws_peer.msgs[#ws_peer.msgs].lines[1])
+  end)
+end)
