@@ -157,8 +157,16 @@ describe("protocol", function()
       assert.is_number(msg.peer)
     end)
 
+    it("hello_ack fixture has required fields", function()
+      local msg, err = load_fixture("hello_ack.json")
+      assert.is_nil(err, err)
+      assert.equals("hello_ack", msg.t)
+      assert.is_string(msg.name)
+      assert.is_table(msg.caps)
+    end)
+
     it("each fixture round-trips through encode/decode (plaintext)", function()
-      local fixtures = { "handshake.json", "patch.json", "cursor.json", "terminal_data.json", "bye.json" }
+      local fixtures = { "handshake.json", "patch.json", "cursor.json", "terminal_data.json", "bye.json", "hello_ack.json" }
       for _, name in ipairs(fixtures) do
         local msg, err = load_fixture(name)
         assert.is_nil(err, err)
