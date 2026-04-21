@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.1] — 2026-04 (current)
+## [2.1.2] — 2026-04-21 (current)
+
+### Changed
+- **`punch` relay fallback** — when UDP hole-punching fails (symmetric NAT, double NAT),
+  sessions now fall back automatically through a relay broker hosted on the same signaling
+  server. Requires [`punch`](https://luarocks.org/modules/azratul/punch) ≥ 0.3.0.
+  No configuration changes needed.
+
+---
+
+## [2.1.1] — 2026-04
 
 ### Fixed
 - **ngrok TCP transport deadlock** — the client now sends a zero-length probe frame

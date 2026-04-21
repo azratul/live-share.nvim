@@ -59,7 +59,7 @@ The rewrite was carried out with AI assistance as a development tool, with all a
 ## What's new in v2.1.0
 
 ### P2P transport via punch.lua
-A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel between host and guest using NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel is used only during the ~5-second signaling phase; all collaborative traffic flows over a direct encrypted UDP channel afterwards, bypassing the tunnel server entirely.
+A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel between host and guest using NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel is used only during the ~5-second signaling phase; all collaborative traffic flows over a direct encrypted UDP channel afterwards, bypassing the tunnel server entirely. When direct hole-punching fails (e.g. symmetric NAT or double NAT), the session automatically falls back to a relay broker hosted on the same signaling server — no extra configuration required.
 
 The P2P channel is encrypted with AES-256-GCM using the same session key that travels in the URL fragment.
 
@@ -264,7 +264,7 @@ For a detailed technical specification of the communication layer, message schem
 | Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
 | Follow mode | **Beta** | Buffer tracking works; minor edge cases on rapid switches |
 | Workspace browser | **Beta** | File tree and open-by-path work; large workspaces untested |
-| `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); cross-network testing pending |
+| `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); relay fallback for symmetric/double NAT |
 | Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
 
 The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers. Everything else may have rough edges. Issues and feedback are welcome.
