@@ -100,3 +100,52 @@ local function raw_ws_peer(port, key)
   return peer
 end
 
+-- ── WebSocket mode ────────────────────────────────────────────────────────────
+describe("WebSocket mode integration", function()
+  after_each(function()
+    server.stop()
+    client.stop()
+  end)
+
+  it("server receives connect event when client joins in WS mode", function()
+    local received = nil
+
+    server.setup(function(msg, peer_id)
+      received = { msg = msg, peer_id = peer_id }
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT, nil), "server failed to bind")
+
+    client.setup(function(_msg) end)
+    client.connect("127.0.0.1", BASE_PORT, nil, "ws", 0, nil)
+
+    assert.is_true(
+      wait_for(function() return received ~= nil end),
+      "timed out — server never received connect event in WS mode"
+    )
+    assert.equals("connect", received.msg.t)
+    assert.is_number(received.msg.peer)
+  end)
+
+  it("server sends a message that the client receives after WS connect", function()
+    local client_received = nil
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        server.approve(peer_id)
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "ws-sid", protocol_version = 3 })
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 1, nil), "server failed to bind")
+
+    client.setup(function(msg) client_received = msg end)
+    client.connect("127.0.0.1", BASE_PORT + 1, nil, "ws", 0, nil)
+
+    assert.is_true(
+      wait_for(function() return client_received ~= nil end),
+      "timed out — client never received hello in WS mode"
+    )
+    assert.equals("hello", client_received.t)
+    assert.equals("ws-sid", client_received.sid)
+  end)
+end)
+
