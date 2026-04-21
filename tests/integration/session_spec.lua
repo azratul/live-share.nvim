@@ -149,3 +149,61 @@ describe("WebSocket mode integration", function()
   end)
 end)
 
+-- ── Encrypted mode ────────────────────────────────────────────────────────────
+describe("Encrypted mode integration", function()
+  if not crypto.available then
+    pending("OpenSSL not available — skipping encrypted integration tests")
+    return
+  end
+
+  after_each(function()
+    server.stop()
+    client.stop()
+  end)
+
+  it("TCP mode: server and client exchange messages with AES-256-GCM encryption", function()
+    local key = crypto.generate_key()
+    local client_received = nil
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        server.approve(peer_id)
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-sid", protocol_version = 3 })
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 2, key), "server failed to bind")
+
+    client.setup(function(msg) client_received = msg end)
+    client.connect("127.0.0.1", BASE_PORT + 2, key, "tcp", 0, nil)
+
+    assert.is_true(
+      wait_for(function() return client_received ~= nil end),
+      "timed out — encrypted client never received hello"
+    )
+    assert.equals("hello", client_received.t)
+    assert.equals("enc-sid", client_received.sid)
+  end)
+
+  it("WS mode: server and client exchange messages with AES-256-GCM encryption", function()
+    local key = crypto.generate_key()
+    local client_received = nil
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        server.approve(peer_id)
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-ws-sid", protocol_version = 3 })
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 3, key), "server failed to bind")
+
+    client.setup(function(msg) client_received = msg end)
+    client.connect("127.0.0.1", BASE_PORT + 3, key, "ws", 0, nil)
+
+    assert.is_true(
+      wait_for(function() return client_received ~= nil end),
+      "timed out — encrypted WS client never received hello"
+    )
+    assert.equals("hello", client_received.t)
+    assert.equals("enc-ws-sid", client_received.sid)
+  end)
+end)
