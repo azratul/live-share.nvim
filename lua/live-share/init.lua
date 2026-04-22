@@ -1,6 +1,8 @@
 -- Entry point: merges user config with defaults and wires modules.
 local M = {}
 
+local _config = nil
+
 local function default_service_url()
   local dir = (vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1) and os.getenv("TEMP")
     or (os.getenv("TMPDIR") or "/tmp")
@@ -34,9 +36,14 @@ function M.setup(user_config)
   if not cfg.service_url then
     cfg.service_url = default_service_url()
   end
+  _config = cfg
 
   require("live-share.commands").setup(cfg)
   require("live-share.tunnel").setup(cfg)
+end
+
+function M.get_config()
+  return _config
 end
 
 return M
