@@ -4,32 +4,11 @@
 -- Frame layout (encrypted):  [ 12-byte nonce ][ ciphertext ][ 16-byte GCM tag ]
 -- Key length: 32 bytes (AES-256).  Nonce: 12 random bytes per message.
 local M = {}
+M.available = false
 
 local ffi_ok, ffi = pcall(require, "ffi")
 if not ffi_ok then
-  M.available = false
-  return M
-end
-
--- Try common library names across Linux, macOS, Windows
-local lib
-for _, name in ipairs({
-  "crypto",
-  "libcrypto.so.3",
-  "libcrypto.so.1.1",
-  "libcrypto.dylib",
-  "/run/current-system/sw/share/nix-ld/lib/libcrypto.so",
-}) do
-  local ok, l = pcall(ffi.load, name)
-  if ok then
-    lib = l
-    break
-  end
-end
-
-if not lib then
-  M.available = false
-  -- M.setup(cfg) below can retry with an explicit path from user config.
+  function M.setup() end
   return M
 end
 
@@ -56,7 +35,43 @@ pcall(
 ]]
 )
 
-M.available = true
+local lib
+
+local function try_load(name)
+  local ok, l = pcall(ffi.load, name)
+  if ok then
+    lib = l
+    M.available = true
+    return true
+  end
+  return false
+end
+
+-- Try common library names across Linux, macOS, Windows
+for _, name in ipairs({
+  "crypto",
+  "libcrypto-3-x64",
+  "libcrypto-1_1-x64",
+  "libcrypto-3",
+  "libcrypto-1_1",
+  "libcrypto.so.3",
+  "libcrypto.so.1.1",
+  "libcrypto.dylib",
+  "/run/current-system/sw/share/nix-ld/lib/libcrypto.so",
+}) do
+  if try_load(name) then
+    break
+  end
+end
+
+-- Called from commands.setup() to retry loading with a user-supplied path.
+-- No-op if already available or if no path is given.
+function M.setup(cfg)
+  if M.available or not (cfg and cfg.openssl_lib) then
+    return
+  end
+  try_load(cfg.openssl_lib)
+end
 
 local EVP_CTRL_GCM_SET_IVLEN = 0x9
 local EVP_CTRL_GCM_GET_TAG = 0x10
@@ -65,6 +80,9 @@ local NONCE_LEN = 12
 local TAG_LEN = 16
 
 function M.random_bytes(n)
+  if not M.available then
+    return nil
+  end
   local buf = ffi.new("unsigned char[?]", n)
   lib.RAND_bytes(buf, n)
   return ffi.string(buf, n)
@@ -76,6 +94,9 @@ end
 
 -- Returns ciphertext .. tag.
 function M.encrypt(plaintext, key, nonce)
+  if not M.available then
+    return plaintext
+  end
   local ctx = lib.EVP_CIPHER_CTX_new()
   local out = ffi.new("unsigned char[?]", #plaintext + TAG_LEN)
   local outl = ffi.new("int[1]")
@@ -96,6 +117,9 @@ end
 
 -- Returns plaintext, or nil if authentication fails.
 function M.decrypt(ciphertext_with_tag, key, nonce)
+  if not M.available then
+    return ciphertext_with_tag
+  end
   if #ciphertext_with_tag < TAG_LEN then
     return nil
   end
@@ -120,19 +144,6 @@ function M.decrypt(ciphertext_with_tag, key, nonce)
     return nil
   end
   return ffi.string(out, pt_len + outl[0])
-end
-
--- Called from commands.setup() to retry loading with a user-supplied path.
--- No-op if already available or if no path is given.
-function M.setup(cfg)
-  if M.available or not (cfg and cfg.openssl_lib) then
-    return
-  end
-  local ok, l = pcall(ffi.load, cfg.openssl_lib)
-  if ok then
-    lib = l
-    M.available = true
-  end
 end
 
 -- Base64url (RFC 4648 §5, no padding)
