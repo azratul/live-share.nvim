@@ -6,13 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
-
----
-
 ## [2.1.3] — 2026-04-22 (current)
 
 ### Fixed
+- **`punch` signaling server bind address** — the host-side signaling server now
+  binds to `127.0.0.1` instead of `0.0.0.0`.  Binding to `0.0.0.0` caused the
+  relay fallback to fail silently: the host session was configured with relay URL
+  `ws://0.0.0.0:PORT/relay`, which is not a valid connection target on most
+  systems.  With `127.0.0.1` the host can connect to its own relay broker and
+  the symmetric-NAT relay path works end-to-end.
+  Requires [`punch`](https://luarocks.org/modules/azratul/punch) ≥ 0.3.2.
 - **`punch` relay token mismatch** — the connector (guest) no longer generates its
   own relay token; it reads the host's token from the remote description instead.
   Previously both peers generated independent tokens and never matched at the relay

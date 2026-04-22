@@ -47,11 +47,7 @@ function M.new_punch_listener(opts)
   local on_message = opts.on_msg
   local stun = opts.stun or "stun.l.google.com:19302"
 
-  local sig_srv, srv_err = sig.new({ host = "0.0.0.0", port = 0 })
-  if not sig_srv then
-    -- Fallback to default if host option is not supported in this version
-    sig_srv, srv_err = sig.new({ port = 0 })
-  end
+  local sig_srv, srv_err = sig.new({ port = 0 })
   if not sig_srv then
     error("punch_conn: failed to start signaling server: " .. tostring(srv_err))
   end
