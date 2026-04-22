@@ -49,12 +49,24 @@ jobs:
           git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
             ~/AppData/Local/nvim-data/site/pack/vendor/start/plenary.nvim
 
-      - name: Run tests
+      - name: Run tests (Unix)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           nvim --headless \
             -u tests/minimal_init.lua \
             -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          for spec in $(find tests/ -name '*_spec.lua'); do
+            nvim --headless \
+              -u tests/minimal_init.lua \
+              -c "PlenaryBustedFile $spec"
+          done
 
   health:
     name: Health check (${{ matrix.os }})
