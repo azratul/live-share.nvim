@@ -1,5 +1,9 @@
 # Live Share Plugin for Neovim
 
+[![CI](https://github.com/azratul/live-share.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/azratul/live-share.nvim/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/azratul/live-share.nvim)](https://github.com/azratul/live-share.nvim/releases/latest)
+[![Neovim 0.9+](https://img.shields.io/badge/Neovim-0.9%2B-blueviolet?logo=neovim)](https://neovim.io)
+[![License](https://img.shields.io/github/license/azratul/live-share.nvim)](LICENSE)
 ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/azratul/live-share.nvim)
 ![GitHub repo size](https://img.shields.io/github/repo-size/azratul/live-share.nvim)
 
