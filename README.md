@@ -13,6 +13,51 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 
 > Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions. However, the underlying protocol is now publicly available, allowing developers of VS Code or any other editor to build their own client implementation and interoperate with the collaboration system. In that sense, while the plugin itself is Neovim-focused, the protocol is now editor-independent and open to broader ecosystem adoption.
 
+## Quick Start
+
+**Default setup** (SSH already installed, no extra Lua dependencies):
+
+```lua
+-- lazy.nvim
+{
+  "azratul/live-share.nvim",
+  config = function()
+    require("live-share").setup({
+      username = "your-name",
+      -- service defaults to "nokey@localhost.run" (SSH required)
+    })
+  end,
+}
+```
+
+Start hosting: `:LiveShareHostStart` — the share URL is copied to your clipboard.
+Join a session: `:LiveShareJoin <url>`
+
+**P2P setup** (direct UDP, bypasses the tunnel after the initial handshake — requires [`punch`](https://github.com/azratul/punch.lua) ≥ 0.3.0):
+
+```lua
+-- lazy.nvim with luarocks.nvim (recommended — pins the rock version)
+{
+  "vhyrro/luarocks.nvim",
+  lazy = false,
+  priority = 1000,
+  config = true,
+  opts = { rocks = { "punch >= 0.3.0" } },
+},
+{
+  "azratul/live-share.nvim",
+  dependencies = { "vhyrro/luarocks.nvim" },
+  config = function()
+    require("live-share").setup({
+      username  = "your-name",
+      transport = "punch",
+    })
+  end,
+}
+```
+
+See the [Installation](#installation) section for packer.nvim, vim-plug, and alternative setups.
+
 ## Editor interoperability
 
 There is also early work on a VS Code client built around the `azratul/live-share.nvim` protocol: [open-pair](https://github.com/darkerthanblack2000/open-pair).
@@ -49,7 +94,8 @@ The rewrite was carried out with AI assistance as a development tool, with all a
     ```
     The free plan works fine.
   - `bore`: requires the [`bore`](https://github.com/ekzhang/bore) CLI
-- **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library:
+- **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library ≥ 0.3.0
+  (0.3.0 adds the relay fallback for symmetric/double NAT):
   ```bash
   luarocks install punch
   ```
@@ -130,13 +176,16 @@ Basic installation (no P2P transport):
 }
 ```
 
-**Option B** — auto-install punch via [luarocks.nvim](https://github.com/vhyrro/luarocks.nvim):
+**Option B** — auto-install punch via [luarocks.nvim](https://github.com/vhyrro/luarocks.nvim)
+(recommended — makes punch part of your Neovim config and pins the required version):
 
 ```lua
 {
   "vhyrro/luarocks.nvim",
+  lazy = false,          -- must load before everything else
   priority = 1000,
-  opts = { rocks = { "punch" } },
+  config = true,
+  opts = { rocks = { "punch >= 0.3.0" } },
 },
 {
   "azratul/live-share.nvim",
@@ -147,7 +196,7 @@ Basic installation (no P2P transport):
       service   = "bore",   -- or "ngrok", "serveo.net", "nokey@localhost.run"
       username  = "your-name",
     })
-  end
+  end,
 }
 ```
 
