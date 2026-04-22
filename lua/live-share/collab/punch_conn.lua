@@ -320,10 +320,12 @@ function M.new_punch_connector(opts)
   function self:connect(signaling_url, _port, on_error)
     dbg("connecting via signaling URL: " .. tostring(signaling_url))
 
-    -- Derive relay URL from the signaling URL (http → ws, append /relay).
-    local relay_url = signaling_url:gsub("^http://", "ws://") .. "/relay"
+    -- Derive relay WebSocket URL from the signaling URL and append /relay.
+    -- The connector is a relay consumer: it does not generate its own relay_token;
+    -- it will use the host's token from the remote description instead.
+    local relay_url = signaling_url:gsub("^http://", "ws://"):gsub("^https://", "wss://") .. "/relay"
 
-    s = punch.session.new({ stun = stun, key = session_key, relay = relay_url })
+    s = punch.session.new({ stun = stun, key = session_key, relay = relay_url, relay_is_consumer = true })
 
     s:on("error", function(e)
       local msg = "connector punch error: " .. tostring(e and e.message or e)
