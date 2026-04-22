@@ -129,6 +129,36 @@ The protocol follows a **Central Authority (Host)** model. It does not use CRDTs
 - **Line-based Patching:** Edits are synchronized as line-range replacements.
 - **Virtual Filesystem:** Guests should treat remote files as virtual resources (e.g., `liveshare://<session_id>/<path>`) and should not save them to the local physical disk.
 
+### 3.1 Last-Write-Wins Semantics
+
+"Last-write-wins" means the host applies incoming patches in the order they arrive and broadcasts each one with an authoritative `seq`. There is no attempt to merge concurrent edits: if two guests modify the same line at the same time, one edit wins (whichever reached the host first) and the other is overwritten.
+
+Resolution flow for concurrent edits to the same line:
+
+1. Guest A and Guest B both edit line 10 simultaneously and send their patches (each without a `seq` — guests never assign seq).
+2. The host receives Guest A's patch first, applies it, stamps it `seq: N`, and broadcasts it to all peers including Guest B.
+3. The host then receives Guest B's patch, applies it (overwriting Guest A's result), stamps it `seq: N+1`, and broadcasts it.
+4. Guest A receives `seq: N+1` and applies it, overwriting their own last edit. Guest A's change is lost.
+5. The final state reflects Guest B's edit on top of Guest A's, as seen by every peer.
+
+**Convergence guarantee:** after all broadcasts are applied, every peer (including the host) holds identical buffer contents. There are no permanent divergences.
+
+### 3.2 Practical Implications for Implementors
+
+- **Non-overlapping edits are safe.** Patches are line-range replacements, so edits to different lines never interfere.
+- **Concurrent edits to the same line are unreliable.** One participant's change will be silently overwritten. The loser sees their change disappear when the next broadcast arrives.
+- **Latency widens the conflict window.** At ~200 ms one-way latency, the probability of a same-line collision increases significantly. Clients should not infer correctness from locally-optimistic state; the host's broadcast is the only authoritative version.
+- **The host's local edits race the same way.** If the host edits line 10 at the same instant a guest patch for line 10 arrives, the host applies whichever internal operation runs first. The resulting `seq`-stamped broadcast is authoritative regardless of the source.
+- **Read-only guests (`role: ro`) cannot cause conflicts.** Their patches are rejected at the server before reaching the host; they only observe the authoritative stream.
+- **Undo stacks are not coordinated.** Each peer has an independent undo history. Undoing a local change after a remote patch has been applied may produce unexpected results and is not recoverable.
+
+### 3.3 Known Limitations
+
+- **No operational transform or CRDT.** Concurrent same-line edits are resolved by TCP arrival order at the host, not by semantic intent. This is a deliberate trade-off: the expected collaboration pattern is one active author with observers, or light turn-based editing — not simultaneous heavy editing of the same lines.
+- **No undo coordination across peers.** See §3.2.
+- **No offline edit queuing.** Edits made during a transient disconnect are not buffered. On rejoin the guest receives a fresh snapshot; offline changes are discarded.
+- **Large-block vs. small-edit races.** If guest A replaces a large block while guest B makes small edits within that block, the small edits may be dropped when the block replacement wins and is broadcast. The guest will resync via `file_request` if the resulting `lnum` goes out of range, but intermediate edits between the race and the resync are not recoverable.
+
 ---
 
 ## 4. Protocol Versioning

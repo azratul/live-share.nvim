@@ -251,6 +251,23 @@ For a detailed technical specification of the communication layer, message schem
 - **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
 - **Shared terminal**: PTY I/O streamed over the same encrypted connection as all other session events.
 
+### Conflict model
+
+The plugin uses **line-level last-write-wins**: the host is the sole ordering authority and applies guest edits in the order they arrive over TCP/UDP. If two participants edit the same line simultaneously, one edit wins (whichever reached the host first) and the other is silently overwritten. After all broadcasts are applied, every peer converges to identical state — there are no permanent divergences.
+
+**What this means in practice:**
+
+| Scenario | Result |
+|----------|--------|
+| Two users edit different lines simultaneously | Safe — no interference |
+| Two users edit the same line simultaneously | One edit is lost (arrival order at host decides) |
+| High-latency connection (> 200 ms) | Conflict window is larger; same-line edits less reliable |
+| Read-only guest (`role: ro`) | Cannot cause conflicts; receives authoritative stream only |
+
+This is a deliberate trade-off. The expected collaboration pattern is one active author with observers, or light turn-based editing. For use cases requiring true simultaneous editing of the same lines, a CRDT-based protocol would be more appropriate at significantly higher implementation complexity.
+
+For the full semantics, known limitations, and convergence guarantees, see [§3 of PROTOCOL.md](./PROTOCOL.md#3-synchronization-strategy).
+
 ## Stability matrix
 
 | Feature | Status | Notes |
