@@ -6,7 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.2] — 2026-04-21 (current)
+## [Unreleased]
+
+---
+
+## [2.1.3] — 2026-04-22 (current)
+
+### Fixed
+- **`punch` relay token mismatch** — the connector (guest) no longer generates its
+  own relay token; it reads the host's token from the remote description instead.
+  Previously both peers generated independent tokens and never matched at the relay
+  broker, so relay fallback always failed in symmetric/double NAT scenarios.
+  Requires [`punch`](https://luarocks.org/modules/azratul/punch) ≥ 0.3.1.
+- **`punch` relay URL for HTTPS tunnels** — `https://` signaling URLs are now
+  correctly converted to `wss://` for the relay WebSocket connection (previously
+  only `http://` → `ws://` was handled, leaving HTTPS tunnel relay broken).
+
+### Added
+- **Improved `:checkhealth`** — health checks now report the configured transport mode
+  (`ws` / `punch`), verify the correct tunnel-provider binary for the active `service`
+  setting (`ssh`, `ngrok`, `bore`), check that the `punch` library is installed when
+  `transport = "punch"`, warn when no username is configured, and provide
+  platform-specific install hints for OpenSSL (Linux distros, macOS, Windows).
+  Fixed Neovim version requirement in health check from 0.5 to 0.9 to match actual
+  requirements.
+- **LWW conflict model documentation** — `PROTOCOL.md` §3 now has three subsections:
+  §3.1 describes last-write-wins semantics with a step-by-step concurrent-edit example;
+  §3.2 documents practical implications for client implementors (safe vs. unsafe scenarios,
+  latency effects, undo behavior); §3.3 lists known limitations. `README.md` gains a
+  "Conflict model" quick-reference table linking to the full spec.
+- **Networking edge-case tests** — two new integration test suites:
+  - `tests/integration/edge_cases_spec.lua` (5 tests): synthesized `bye` on abrupt
+    disconnect, `bye` broadcast to remaining peers (§7.3), `unauthorized` error for
+    read-only guest patch (§5.4), `rejected` message delivery via `server.reject()`,
+    and `broadcast(msg, except_peer)` exclusion guarantee.
+  - `tests/integration/concurrent_spec.lua` (4 tests): three-peer broadcast, sequential
+    message delivery order (5 patches in send order), and concurrent patches from two
+    and three guests all reaching the server.
+
+---
+
+## [2.1.2] — 2026-04-21
 
 ### Changed
 - **`punch` relay fallback** — when UDP hole-punching fails (symmetric NAT, double NAT),
