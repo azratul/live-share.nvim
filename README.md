@@ -104,7 +104,7 @@ The rewrite was carried out with AI assistance as a development tool, with all a
   luarocks install punch
   ```
 
-- **Tested Environments**: Linux and OpenBSD. macOS and Windows (GitBash only) are untested.
+- **Tested Environments** (`ws` transport): Linux, macOS, and Windows (Git Bash). The `punch` P2P transport is not yet stable on any platform — use `ws` for production sessions.
 
 ## What's new in v2.1.0
 
@@ -334,10 +334,10 @@ For the full semantics, known limitations, and convergence guarantees, see [§3 
 | Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
 | Follow mode | **Beta** | Buffer tracking works; minor edge cases on rapid switches |
 | Workspace browser | **Beta** | File tree and open-by-path work; large workspaces untested |
-| `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); relay fallback for symmetric/double NAT |
+| `punch` P2P transport | **Experimental** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); relay fallback for symmetric/double NAT under active development — not yet stable |
 | Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
 
-The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers. Everything else may have rough edges. Issues and feedback are welcome.
+The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport is still under active development — relay fallback for symmetric/double NAT is not yet reliable. Everything else may have rough edges. Issues and feedback are welcome.
 
 ## Contributing
 
