@@ -104,7 +104,7 @@ The rewrite was carried out with AI assistance as a development tool, with all a
   luarocks install punch
   ```
 
-- **Tested Environments** (`ws` transport): Linux, macOS, and Windows (Git Bash). The `punch` P2P transport is not yet stable on any platform — use `ws` for production sessions.
+- **Tested Environments** (`ws` transport): Linux, OpenBSD, macOS, and Windows (Git Bash). The `punch` P2P transport is not yet stable on any platform — use `ws` for production sessions.
 
 ## What's new in v2.1.0
 
