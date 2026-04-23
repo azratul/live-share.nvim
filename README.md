@@ -343,15 +343,6 @@ The `ws` transport, encryption, and buffer sync are the most exercised paths and
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, code style, running tests, and PR guidelines.
 
-## Troubleshooting
-
-See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues with OpenSSL, tunnel providers, and the P2P transport.
-Run `:checkhealth live-share` first — it catches most configuration problems automatically.
-
-## Roadmap
-
-See [ROADMAP.md](./ROADMAP.md).
-
 ## License
 
 This project is licensed under the GPL-3.0 License.
