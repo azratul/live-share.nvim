@@ -37,7 +37,7 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 Start hosting: `:LiveShareHostStart` — the share URL is copied to your clipboard.
 Join a session: `:LiveShareJoin <url>`
 
-**P2P setup** (direct UDP, bypasses the tunnel after the initial handshake — requires [`punch`](https://github.com/azratul/punch.lua) ≥ 0.3.1):
+**P2P setup** (direct UDP, bypasses the tunnel after the initial handshake — requires [`punch`](https://github.com/azratul/punch.lua) ≥ 0.3.2):
 
 ```lua
 -- lazy.nvim with luarocks.nvim (recommended — pins the rock version)
@@ -46,7 +46,7 @@ Join a session: `:LiveShareJoin <url>`
   lazy = false,
   priority = 1000,
   config = true,
-  opts = { rocks = { "punch >= 0.3.1" } },
+  opts = { rocks = { "punch >= 0.3.2" } },
 },
 {
   "azratul/live-share.nvim",
@@ -98,8 +98,8 @@ The rewrite was carried out with AI assistance as a development tool, with all a
     ```
     The free plan works fine.
   - `bore`: requires the [`bore`](https://github.com/ekzhang/bore) CLI
-- **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library ≥ 0.3.1
-  (0.3.1 adds the relay fallback for symmetric/double NAT):
+- **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library ≥ 0.3.2
+  (0.3.2 adds the relay fallback for symmetric/double NAT):
   ```bash
   luarocks install punch
   ```
@@ -189,7 +189,7 @@ Basic installation (no P2P transport):
   lazy = false,          -- must load before everything else
   priority = 1000,
   config = true,
-  opts = { rocks = { "punch >= 0.3.1" } },
+  opts = { rocks = { "punch >= 0.3.2" } },
 },
 {
   "azratul/live-share.nvim",
@@ -342,6 +342,15 @@ The `ws` transport, encryption, and buffer sync are the most exercised paths and
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, code style, running tests, and PR guidelines.
+
+## Troubleshooting
+
+See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues with OpenSSL, tunnel providers, and the P2P transport.
+Run `:checkhealth live-share` first — it catches most configuration problems automatically.
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md).
 
 ## License
 

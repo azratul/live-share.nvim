@@ -78,7 +78,7 @@ function M.check()
 
     local punch_ok = pcall(require, "punch")
     if punch_ok then
-      vim.health.ok("punch library found — P2P transport available (relay fallback requires ≥ 0.3.1)")
+      vim.health.ok("punch library found — P2P transport available (relay fallback requires ≥ 0.3.2)")
     else
       vim.health.error('punch library not found — required for transport = "punch"; run: luarocks install punch')
     end

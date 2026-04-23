@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   own relay token; it reads the host's token from the remote description instead.
   Previously both peers generated independent tokens and never matched at the relay
   broker, so relay fallback always failed in symmetric/double NAT scenarios.
-  Requires [`punch`](https://luarocks.org/modules/azratul/punch) ≥ 0.3.1.
+  Requires [`punch`](https://luarocks.org/modules/azratul/punch) ≥ 0.3.2.
 - **`punch` relay URL for HTTPS tunnels** — `https://` signaling URLs are now
   correctly converted to `wss://` for the relay WebSocket connection (previously
   only `http://` → `ws://` was handled, leaving HTTPS tunnel relay broken).
