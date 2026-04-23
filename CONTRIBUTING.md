@@ -1,5 +1,15 @@
 # Contributing to live-share.nvim
 
+Contributions are welcome. The most useful things to contribute right now:
+
+- **Bug reports** — especially for `punch` P2P transport and cross-platform encryption issues
+- **Bug fixes** — open an issue first for anything non-trivial to align on approach
+- **Test coverage** — integration tests for edge cases described in `PROTOCOL.md`
+- **Documentation** — troubleshooting steps, configuration examples, platform-specific notes
+- **Protocol clients** — if you're building a live-share.nvim client for another editor, open an issue; protocol feedback and compatibility testing are welcome
+
+For large features or protocol changes, open an issue before writing code.
+
 ## Requirements
 
 - Neovim 0.9+
@@ -93,9 +103,28 @@ The wire protocol is documented in [`PROTOCOL.md`](PROTOCOL.md). The current ver
 
 **Protocol fixtures** live in `tests/fixtures/`. When adding a new message type, add a corresponding fixture file and a test in `tests/protocol/protocol_spec.lua`.
 
+## Reporting bugs
+
+Include the following in bug reports:
+
+1. Output of `:checkhealth live-share`
+2. Debug log from both host and guest (enable with `debug = true` in `setup()`, then `:messages`)
+3. Neovim version (`:version`)
+4. OS and how OpenSSL / punch are installed
+
+For `punch` P2P issues, also include the tunnel service being used and whether the error mentions relay or only direct candidates.
+
 ## Submitting changes
 
 - Open an issue first for non-trivial changes to align on design before writing code.
 - Keep pull requests focused: one feature or fix per PR.
 - Protocol changes require updating `PROTOCOL.md` and `CHANGELOG.md` in the same PR.
-- All CI checks (style, tests, health) must pass.
+- All CI checks (style, tests) must pass.
+
+**PR checklist:**
+
+- [ ] `stylua --check lua/ plugin/` passes
+- [ ] Full test suite passes (see [Running tests](#running-tests))
+- [ ] New message types have a fixture in `tests/fixtures/` and a test in `tests/protocol/`
+- [ ] `CHANGELOG.md` updated under `[Unreleased]`
+- [ ] `PROTOCOL.md` updated if the wire format changed

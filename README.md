@@ -341,7 +341,7 @@ The `ws` transport, encryption, and buffer sync are the most exercised paths and
 
 ## Contributing
 
-Feel free to open issues or submit pull requests.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, code style, running tests, and PR guidelines.
 
 ## License
 
