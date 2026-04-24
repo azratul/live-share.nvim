@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.4] — 2026-04-23 (current)
+## [2.1.4] — 2026-04-24 (current)
 
 ### Changed
 - **`punch` 0.3.2 now required** — the published 0.3.2 rock now includes container
@@ -16,6 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`punch` P2P transport status** — upgraded from **Experimental** to **Beta** in the
   stability matrix.  The relay fallback for symmetric/double NAT is now end-to-end tested
   on Linux with all four built-in tunnel providers (serveo.net, localhost.run, ngrok, bore).
+- **`punch` connection type notification** — when NAT hole-punching fails and the session
+  falls back to the relay broker, the status notification now correctly reads
+  connected (relay) instead of connected (P2P). The same correction applies to the
+  disconnect notification (relay connection closed vs. P2P connection closed).
+  Affected both the host side (per-peer notification) and the guest side. 
 
 ---
 
