@@ -1,22 +1,21 @@
--- UI layer: workspace tree explorer and participants panel.
+-- UI layer: workspace file picker and participants panel.
 -- Pure Neovim API — no external plugin dependencies.
 local M = {}
 
--- ── Workspace explorer ────────────────────────────────────────────────────────
+-- ── Workspace file picker ─────────────────────────────────────────────────────
 --
--- Opens a vsplit with a tree view of the remote workspace.
--- <CR> / o  → request file from host and open it
--- q         → close explorer
--- R         → refresh (re-open with current file list)
--- ?         → show help
+-- Uses vim.ui.select when a plugin has overridden it (telescope-ui-select,
+-- fzf-lua, snacks, …); falls back to a custom collapsible tree otherwise.
 
-local EXPLORER_NAME = "live-share://workspace"
+local function has_ui_select_override()
+  local info = debug.getinfo(vim.ui.select, "S")
+  return info and info.source and not info.source:find("vim/ui%.lua", 1, false)
+end
 
--- Build a tree from a flat path list.
--- Returns root node: { children = { name → node }, files = { name → path }, _order = [...] }
+-- ── Tree fallback ─────────────────────────────────────────────────────────────
+
 local function build_tree(paths)
   local root = { children = {}, files = {}, _order = {} }
-
   for _, path in ipairs(paths) do
     local parts = vim.split(path, "/", { plain = true })
     local node = root
@@ -32,14 +31,10 @@ local function build_tree(paths)
     node.files[fname] = path
     node._order[#node._order + 1] = { kind = "file", name = fname, path = path }
   end
-
   return root
 end
 
--- Render the tree into a lines array.
--- path_map[line_number] = workspace-relative path (only for file lines).
-local function render_tree(node, lines, indent, path_map)
-  -- Sort: dirs before files, alphabetical within each group.
+local function render_tree(node, lines, path_map, dir_map, collapsed, indent, node_path)
   local order = vim.deepcopy(node._order)
   table.sort(order, function(a, b)
     if a.kind ~= b.kind then
@@ -50,14 +45,88 @@ local function render_tree(node, lines, indent, path_map)
 
   for _, item in ipairs(order) do
     if item.kind == "dir" then
-      lines[#lines + 1] = indent .. "▸ " .. item.name .. "/"
-      render_tree(node.children[item.name], lines, indent .. "  ", path_map)
+      local full_path = node_path .. item.name
+      local icon = collapsed[full_path] and "▸" or "▾"
+      lines[#lines + 1] = indent .. icon .. " " .. item.name .. "/"
+      dir_map[#lines] = full_path
+      if not collapsed[full_path] then
+        render_tree(node.children[item.name], lines, path_map, dir_map, collapsed, indent .. "  ", full_path .. "/")
+      end
     else
       lines[#lines + 1] = indent .. "  " .. item.name
       path_map[#lines] = item.path
     end
   end
 end
+
+local EXPLORER_NAME = "live-share://workspace"
+
+local function open_tree_explorer(files, root_name, on_select)
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    local wb = vim.api.nvim_win_get_buf(w)
+    if vim.api.nvim_buf_get_name(wb) == EXPLORER_NAME then
+      vim.api.nvim_win_close(w, true)
+      break
+    end
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_name(buf, EXPLORER_NAME)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+
+  local tree = build_tree(files)
+  local collapsed = {}
+  local path_map = {}
+  local dir_map = {}
+
+  local function refresh()
+    for k in pairs(path_map) do
+      path_map[k] = nil
+    end
+    for k in pairs(dir_map) do
+      dir_map[k] = nil
+    end
+    local lines = { "  " .. root_name .. "/", "" }
+    render_tree(tree, lines, path_map, dir_map, collapsed, "  ", "")
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+  end
+
+  refresh()
+
+  vim.cmd("topleft vsplit")
+  vim.api.nvim_set_current_buf(buf)
+  vim.cmd("vertical resize 38")
+
+  local opts = { noremap = true, silent = true, buffer = buf }
+
+  vim.keymap.set("n", "<CR>", function()
+    local lnum = vim.api.nvim_win_get_cursor(0)[1]
+    local file_path = path_map[lnum]
+    local dir_path = dir_map[lnum]
+    if file_path then
+      vim.cmd("wincmd p")
+      on_select(file_path)
+    elseif dir_path then
+      collapsed[dir_path] = not collapsed[dir_path] or nil
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      refresh()
+      cursor[1] = math.min(cursor[1], vim.api.nvim_buf_line_count(buf))
+      vim.api.nvim_win_set_cursor(0, cursor)
+    end
+  end, opts)
+
+  vim.keymap.set("n", "q", "<cmd>close<CR>", opts)
+  vim.keymap.set("n", "R", function()
+    vim.cmd("close")
+    open_tree_explorer(files, root_name, on_select)
+  end, opts)
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
 
 function M.open_workspace_explorer()
   local ok_g, guest = pcall(require, "live-share.guest")
@@ -72,65 +141,18 @@ function M.open_workspace_explorer()
     return
   end
 
-  local root_name = guest.get_workspace_root_name() or "workspace"
-
-  -- Close existing explorer if already open.
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    local wb = vim.api.nvim_win_get_buf(w)
-    if vim.api.nvim_buf_get_name(wb) == EXPLORER_NAME then
-      vim.api.nvim_win_close(w, true)
-      break
-    end
-  end
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(buf, EXPLORER_NAME)
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = "live_share_workspace"
-
-  local lines = { "  " .. root_name .. "/", "" }
-  local path_map = {}
-
-  local tree = build_tree(files)
-  render_tree(tree, lines, "  ", path_map)
-  lines[#lines + 1] = ""
-  lines[#lines + 1] = "  ? for help"
-
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-
-  -- Open in a left vsplit.
-  vim.cmd("topleft vsplit")
-  vim.api.nvim_set_current_buf(buf)
-  vim.cmd("vertical resize 38")
-
-  local opts = { noremap = true, silent = true, buffer = buf }
-
-  local function open_file_at_cursor()
-    local lnum = vim.api.nvim_win_get_cursor(0)[1]
-    local path = path_map[lnum]
-    if path then
-      vim.cmd("wincmd p")
+  if has_ui_select_override() then
+    vim.ui.select(files, { prompt = "Workspace files" }, function(path)
+      if path then
+        guest.request_file(path)
+      end
+    end)
+  else
+    local root_name = guest.get_workspace_root_name() or "workspace"
+    open_tree_explorer(files, root_name, function(path)
       guest.request_file(path)
-    end
+    end)
   end
-
-  vim.keymap.set("n", "<CR>", open_file_at_cursor, opts)
-  vim.keymap.set("n", "o", open_file_at_cursor, opts)
-  vim.keymap.set("n", "q", "<cmd>close<CR>", opts)
-  vim.keymap.set("n", "R", function()
-    vim.cmd("close")
-    M.open_workspace_explorer()
-  end, opts)
-  vim.keymap.set("n", "?", function()
-    vim.notify(
-      "live-share workspace:\n" .. "  <CR> / o  open file\n" .. "  q         close\n" .. "  R         refresh",
-      vim.log.levels.INFO
-    )
-  end, opts)
 end
 
 -- ── Participants panel ────────────────────────────────────────────────────────
