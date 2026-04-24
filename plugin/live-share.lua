@@ -99,6 +99,13 @@ end, {
   desc = "Open a shared terminal (host: spawns shell; guest: connects automatically)",
 })
 
+-- :LiveShareDebugInfo
+cmd("LiveShareDebugInfo", function()
+  require("live-share.commands").debug_info()
+end, {
+  desc = "Open a scratch buffer with debug info for bug reports",
+})
+
 -- :LiveShareServer is a deprecated alias for :LiveShareHostStart (renamed in v2.0.0)
 cmd("LiveShareServer", function(opts)
   vim.notify("live-share: :LiveShareServer is deprecated, use :LiveShareHostStart", vim.log.levels.WARN)

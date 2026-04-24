@@ -201,6 +201,61 @@ function M.terminal()
   end
 end
 
+-- :LiveShareDebugInfo
+function M.debug_info()
+  local lines = { "# live-share.nvim debug info", "" }
+
+  local cfg = require("live-share").get_config()
+  local crypto = require("live-share.collab.crypto")
+  local protocol = require("live-share.collab.protocol")
+  local session = require("live-share.session")
+
+  -- Plugin / protocol
+  lines[#lines + 1] = "plugin version : 2.1.4"
+  lines[#lines + 1] = "protocol version: " .. tostring(protocol.VERSION)
+
+  -- Neovim
+  local nv = vim.version()
+  lines[#lines + 1] = "neovim version  : " .. nv.major .. "." .. nv.minor .. "." .. nv.patch
+
+  -- OS
+  local uname = (vim.uv or vim.loop).os_uname()
+  lines[#lines + 1] = "os              : " .. (uname.sysname or "unknown") .. " " .. (uname.release or "")
+
+  -- OpenSSL
+  lines[#lines + 1] = "openssl         : " .. (crypto.available and "available" or "NOT FOUND — encryption disabled")
+
+  -- Config
+  if cfg then
+    lines[#lines + 1] = "transport       : " .. (cfg.transport or "ws")
+    lines[#lines + 1] = "tunnel provider : " .. (cfg.service or "nokey@localhost.run")
+    lines[#lines + 1] = "port internal   : " .. tostring(cfg.port_internal or 9876)
+    lines[#lines + 1] = "debug logging   : " .. (cfg.debug and "on" or "off")
+    if cfg.openssl_lib then
+      lines[#lines + 1] = "openssl_lib     : " .. cfg.openssl_lib
+    end
+  else
+    lines[#lines + 1] = "(live-share.setup() has not been called)"
+  end
+
+  -- Session state
+  lines[#lines + 1] = ""
+  if session.active() then
+    lines[#lines + 1] = "session         : active (" .. (session.role or "unknown") .. ")"
+    lines[#lines + 1] = "peer id         : " .. tostring(session.peer_id or "n/a")
+    lines[#lines + 1] = "session id      : " .. tostring(session.sid or "n/a")
+  else
+    lines[#lines + 1] = "session         : none"
+  end
+
+  -- Open in a scratch buffer
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].filetype = "markdown"
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_win_set_buf(0, buf)
+end
+
 -- Tab-completion helper for :LiveShareOpen.
 function M.complete_workspace_path(arg_lead)
   local ok, g = pcall(require, "live-share.guest")
