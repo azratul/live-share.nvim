@@ -156,9 +156,10 @@ function M.new_punch_listener(opts)
 
     s:on("open", function()
       dbg("peer " .. peer_id .. " punch open — notifying host")
+      local mode = s:get_selected_pair() and "P2P" or "relay"
       -- Notify the host that a new guest wants to join (approval prompt).
       vim.schedule(function()
-        vim.notify("live-share: peer " .. peer_id .. " connected (P2P)", vim.log.levels.INFO)
+        vim.notify("live-share: peer " .. peer_id .. " connected (" .. mode .. ")", vim.log.levels.INFO)
         if on_message then
           on_message({ t = "connect", peer = peer_id }, peer_id)
         end
@@ -307,6 +308,7 @@ function M.new_punch_connector(opts)
   -- `s` is set inside connect() once the signaling URL is known (needed to
   -- derive the relay URL for the fallback broker on the same server).
   local s = nil
+  local conn_mode = "P2P"
   local self = {}
 
   -- connect(signaling_url, _port, on_error)
@@ -349,7 +351,7 @@ function M.new_punch_connector(opts)
       dbg("connector: punch closed: " .. tostring(reason))
       vim.schedule(function()
         if reason and reason ~= "closed by local peer" then
-          vim.notify("live-share: P2P connection closed: " .. tostring(reason), vim.log.levels.WARN)
+          vim.notify("live-share: " .. conn_mode .. " connection closed: " .. tostring(reason), vim.log.levels.WARN)
         end
         if on_message then
           on_message({ t = "bye", peer = 0 })
@@ -359,8 +361,9 @@ function M.new_punch_connector(opts)
 
     s:on("open", function()
       dbg("connector: punch open")
+      conn_mode = s:get_selected_pair() and "P2P" or "relay"
       vim.schedule(function()
-        vim.notify("live-share: connected (P2P)", vim.log.levels.INFO)
+        vim.notify("live-share: connected (" .. conn_mode .. ")", vim.log.levels.INFO)
       end)
       -- We NO LONGER send an over-the-wire "connect" message because the host
       -- generates one locally when the punch session opens. This avoids race

@@ -6,7 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.3] — 2026-04-22 (current)
+## [2.1.4] — 2026-04-23 (current)
+
+### Changed
+- **`punch` 0.3.2 now required** — the published 0.3.2 rock now includes container
+  support (peer-reflexive candidate learning for Docker/Podman internal IPs), HTTPS proxy
+  compatibility (ALPN forces HTTP/1.1 so localhost.run and similar reverse proxies do not
+  negotiate HTTP/2), and chunked-encoding support in the signaling HTTP client.
+- **`punch` P2P transport status** — upgraded from **Experimental** to **Beta** in the
+  stability matrix.  The relay fallback for symmetric/double NAT is now end-to-end tested
+  on Linux with all four built-in tunnel providers (serveo.net, localhost.run, ngrok, bore).
+
+---
+
+## [2.1.3] — 2026-04-22
 
 ### Fixed
 - **`punch` signaling server bind address** — the host-side signaling server now
