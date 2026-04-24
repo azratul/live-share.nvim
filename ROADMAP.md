@@ -31,6 +31,6 @@ PTY streaming works. The remaining gaps are around guest reconnect (terminal sta
 
 ## Cross-editor interoperability
 
-The [live-share.nvim protocol](./PROTOCOL.md) is editor-agnostic. There is an early-stage VS Code client ([open-pair](https://github.com/darkerthanblack2000/open-pair)) being developed independently. The protocol spec and the SDK (`sdk/`) are the intended interface for other editor implementations.
+The [live-share.nvim protocol](./PROTOCOL.md) is editor-agnostic. There is an early-stage VS Code client ([open-pair](https://github.com/darkerthanblack2000/open-pair)) being developed independently. The protocol spec is the intended interface for other editor implementations.
 
 If you are building a client for another editor, open an issue — compatibility testing and protocol feedback are welcome.
