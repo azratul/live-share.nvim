@@ -237,6 +237,7 @@ EOF
 | `:LiveShareFollow [peer_id]` | Both | Follow a peer's active buffer (no arg = follow host). |
 | `:LiveShareUnfollow` | Both | Stop following. |
 | `:LiveSharePeers` | Both | Show connected participants and their cursor positions. |
+| `:LiveShareDebugInfo` | Both | Open a scratch buffer with environment and session details for bug reports. |
 
 > **Migration note:** `:LiveShareServer` was renamed to `:LiveShareHostStart` in v2.0.0. The old command still works but emits a deprecation warning.
 
