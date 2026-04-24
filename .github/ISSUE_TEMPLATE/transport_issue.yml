@@ -1,0 +1,80 @@
+name: Transport / connection issue
+description: Session won't connect, URL is not generated, or connection drops unexpectedly
+labels: [transport]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening an issue, run `:checkhealth live-share` and check [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What is happening?
+      placeholder: "e.g. URL is never copied to clipboard, guest cannot connect, connection drops after N seconds"
+    validations:
+      required: true
+
+  - type: input
+    id: transport
+    attributes:
+      label: Transport
+      placeholder: "ws or punch"
+    validations:
+      required: true
+
+  - type: input
+    id: service
+    attributes:
+      label: Tunnel service
+      placeholder: "nokey@localhost.run / serveo.net / ngrok / bore"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS (host side)
+      placeholder: "Linux / macOS / Windows"
+    validations:
+      required: true
+
+  - type: input
+    id: os_guest
+    attributes:
+      label: OS (guest side)
+      placeholder: "Linux / macOS / Windows"
+    validations:
+      required: false
+
+  - type: input
+    id: neovim_version
+    attributes:
+      label: Neovim version
+      placeholder: "nvim --version"
+    validations:
+      required: true
+
+  - type: textarea
+    id: checkhealth
+    attributes:
+      label: ":checkhealth live-share output"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug logs
+      description: Set `debug = true` in your config, reproduce the issue, and paste the output.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: network
+    attributes:
+      label: Network context (optional)
+      description: "Are you behind a corporate firewall, VPN, or double NAT? Is the host or guest inside a container or VM?"
+    validations:
+      required: false

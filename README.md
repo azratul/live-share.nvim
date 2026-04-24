@@ -19,7 +19,7 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 
 ## Quick Start
 
-**Default setup** (SSH already installed, no extra Lua dependencies):
+**Recommended setup** — no extra Lua dependencies, SSH already installed on most systems:
 
 ```lua
 -- lazy.nvim
@@ -28,7 +28,6 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
   config = function()
     require("live-share").setup({
       username = "your-name",
-      -- service defaults to "nokey@localhost.run" (SSH required)
     })
   end,
 }
@@ -37,30 +36,26 @@ This plugin brings VS Code-like Live Share functionality natively to Neovim: rea
 Start hosting: `:LiveShareHostStart` — the share URL is copied to your clipboard.
 Join a session: `:LiveShareJoin <url>`
 
-**P2P setup** (direct UDP, bypasses the tunnel after the initial handshake — requires [`punch`](https://github.com/azratul/punch.lua) ≥ 0.3.2):
+This uses `nokey@localhost.run` as the tunnel (SSH-based, no account required) and `ws` as the transport. Both are the most tested paths and work on Linux, macOS, and Windows.
+
+**Advanced: P2P setup** (direct UDP after the initial handshake, requires [`punch`](https://github.com/azratul/punch.lua) ≥ 0.3.2 — currently Linux only):
 
 ```lua
--- lazy.nvim with luarocks.nvim (recommended — pins the rock version)
 {
   "vhyrro/luarocks.nvim",
-  lazy = false,
-  priority = 1000,
-  config = true,
+  lazy = false, priority = 1000, config = true,
   opts = { rocks = { "punch >= 0.3.2" } },
 },
 {
   "azratul/live-share.nvim",
   dependencies = { "vhyrro/luarocks.nvim" },
   config = function()
-    require("live-share").setup({
-      username  = "your-name",
-      transport = "punch",
-    })
+    require("live-share").setup({ username = "your-name", transport = "punch" })
   end,
 }
 ```
 
-See the [Installation](#installation) section for packer.nvim, vim-plug, and alternative setups.
+See the [Installation](#installation) section for packer.nvim, vim-plug, and alternative tunnel providers.
 
 ## Editor interoperability
 
@@ -331,17 +326,40 @@ For the full semantics, known limitations, and convergence guarantees, see [§3 
 | Remote cursors and selections | **Stable** | EOL extmarks, per-peer color, visual range highlight |
 | Guest approval and roles | **Stable** | RW / RO per guest, prompted via `vim.ui.select` |
 | Protocol v3 | **Stable** | Spec in [PROTOCOL.md](./PROTOCOL.md); version negotiation in [COMPATIBILITY.md](./COMPATIBILITY.md) |
-| Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
 | Follow mode | **Stable** | Host and guest follow; auto-disables when followed peer disconnects |
 | Workspace browser | **Stable** | Collapsible tree or fuzzy picker (auto-detected); initial sync is slow on very large workspaces |
+| Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
 | `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua) ≥ 0.3.2; direct + relay paths work on Linux with all built-in providers; other platforms not yet tested |
 | Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
 
 The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport (≥ 0.3.2) is tested on Linux with all four built-in tunnel providers; relay fallback for symmetric/double NAT works end-to-end. Other platforms and edge-case NAT topologies may still have rough edges. Issues and feedback are welcome.
 
+## Known limitations
+
+- **Simultaneous edits to the same line** — the sync model is line-level last-write-wins with the host as ordering authority. If two participants edit the same line at the same time, one edit is silently overwritten. For conflict-free collaboration, use read-only guests or coordinate turns explicitly.
+- **Large workspace initial sync** — the host sends the full workspace file list on connect. Very large directories (tens of thousands of files) make the initial sync slow. File content is only transferred on demand, so the delay is proportional to the number of paths, not their size.
+- **`punch` transport is Linux-only for now** — direct UDP hole-punching and relay fallback are confirmed on Linux with all four built-in tunnel providers. macOS and Windows are untested.
+- **Shared terminal state is lost on guest reconnect** — if a guest disconnects and reconnects, the terminal buffer starts fresh; scrollback from before the reconnect is not replayed.
+- **No authentication beyond key possession** — any guest who obtains the share URL can attempt to join. The host approval prompt is the only gate. Share the URL only through trusted channels.
+- **No forward secrecy** — the tunnel provider sees encrypted traffic during the session and could log it. If the session URL were later leaked (e.g. via a breached chat log), that recorded traffic could in theory be decrypted retroactively. In practice this requires the tunnel provider to log traffic AND the URL to be independently compromised — an unlikely combination for typical pair programming use.
+- **Same protocol version expected** — host and guest should run the same version of live-share.nvim. See [COMPATIBILITY.md](./COMPATIBILITY.md) for the version negotiation details.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, code style, running tests, and PR guidelines.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for the full security model: what is encrypted, what tunnel servers can see, how keys are exchanged, and the threat model.
+
+## Troubleshooting
+
+See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for common issues with OpenSSL, tunnel providers, and the P2P transport.
+Run `:checkhealth live-share` first — it catches most configuration problems automatically.
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md).
 
 ## License
 
