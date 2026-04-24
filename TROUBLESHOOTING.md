@@ -4,6 +4,46 @@ Run `:checkhealth live-share` first — it catches the most common configuration
 
 ---
 
+## Local two-instance smoke test (no tunnel required)
+
+Use this to verify the plugin works on your machine before troubleshooting any network or tunnel issue.
+You need two terminal windows, each running a separate Neovim instance with live-share.nvim installed.
+
+**Instance A — host:**
+
+```vim
+:LiveShareHostStart
+```
+
+The collab server starts on port 9876 immediately. The tunnel process also starts in the background — wait for the **"URL copied to clipboard"** message.
+
+**Get the key:**
+
+The URL in your clipboard looks like `https://abc.lhr.life#key=<base64key>`.
+Copy only the `#key=<base64key>` part; you will use it in the next step.
+
+Alternatively, run `:LiveShareDebugInfo` in the host instance to see the current session state.
+
+**Instance B — guest (same machine):**
+
+```vim
+:LiveShareJoin localhost:9876#key=<base64key>
+```
+
+Replace `<base64key>` with the fragment from the step above.
+The guest connects directly to `127.0.0.1:9876`, bypassing the tunnel entirely.
+
+**What to verify:**
+
+- Both instances show the shared buffer.
+- Typing in Instance A appears in Instance B.
+- Typing in Instance B appears in Instance A (if the guest is RW — approve it when prompted).
+- The remote cursor is visible in each instance.
+
+If this works but joining via the tunnel URL fails, the problem is with the tunnel or network, not the plugin.
+
+---
+
 ## Session won't start
 
 ### "OpenSSL libcrypto not found"
@@ -163,16 +203,24 @@ Extmarks require the buffer to be loaded on the guest side. Open the file via `:
 
 ## Getting more information
 
-Enable debug logging and reproduce the issue:
+### Debug info bundle
+
+Run `:LiveShareDebugInfo` — it opens a scratch buffer with your Neovim version, OS, transport,
+tunnel provider, OpenSSL status, protocol version, and current session state.
+Copy the full output and include it in your bug report.
+
+### Debug logging
+
+Enable verbose logging and reproduce the issue:
 
 ```lua
 require("live-share").setup({ debug = true })
 ```
 
-Logs appear in `:messages`. To capture them:
+Logs appear in `:messages`. Include them in the bug report alongside the `:LiveShareDebugInfo` output.
 
 When reporting a bug, include:
+- Output of `:LiveShareDebugInfo`
 - Output of `:checkhealth live-share`
-- Debug log from both host and guest
-- Neovim version (`:version`)
-- OS and how punch/OpenSSL are installed
+- Debug log from both host and guest (`:messages` with `debug = true`)
+- Steps to reproduce, including whether the [local two-instance test](#local-two-instance-smoke-test-no-tunnel-required) passes

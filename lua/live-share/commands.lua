@@ -227,8 +227,14 @@ function M.debug_info()
 
   -- Config
   if cfg then
-    lines[#lines + 1] = "transport       : " .. (cfg.transport or "ws")
-    lines[#lines + 1] = "tunnel provider : " .. (cfg.service or "nokey@localhost.run")
+    if session.role == "guest" then
+      -- For guests: show the effective transport from the host URL, not local config.
+      -- Tunnel provider is irrelevant (guests never start a tunnel).
+      lines[#lines + 1] = "transport       : " .. (session.transport or "ws") .. " (from host URL)"
+    else
+      lines[#lines + 1] = "transport       : " .. (cfg.transport or "ws")
+      lines[#lines + 1] = "tunnel provider : " .. (cfg.service or "nokey@localhost.run")
+    end
     lines[#lines + 1] = "port internal   : " .. tostring(cfg.port_internal or 9876)
     lines[#lines + 1] = "debug logging   : " .. (cfg.debug and "on" or "off")
     if cfg.openssl_lib then

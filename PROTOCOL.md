@@ -624,6 +624,15 @@ A change is considered breaking if it:
 
 Breaking changes will always increment `protocol_version`. The changelog in §4 will describe the delta. Clients receiving a `protocol_version` higher than their own **must** warn the user and **may** refuse to connect.
 
+### How breaking changes are announced
+
+When a breaking protocol change ships:
+
+1. `protocol_version` is incremented in the source and in this document's header.
+2. The [CHANGELOG](./CHANGELOG.md) entry for that release is marked **BREAKING** and lists every removed or renamed field.
+3. The GitHub release notes for that tag include a plain-language migration note: what changed, whether any action is required, and how to tell if your peer is running an incompatible version.
+4. A deprecation notice is added to this document at least one minor release before the field or behavior is removed, whenever the change can be staged.
+
 ### `file_request` response timeout
 
 `file_request` is a fire-and-forget message — the guest sends it once and waits for the matching `file_response` or `error`. There is no retry mechanism. If no response arrives within 10 seconds, the guest should treat the silence as a connection error and transition to TERMINAL state.

@@ -467,6 +467,7 @@ end
 
 function M.connect(host_addr, port, key_b64, mode)
   session.role = "guest"
+  session.transport = mode or "ws"
 
   local session_key = nil
   if key_b64 and key_b64 ~= "" then
