@@ -427,9 +427,16 @@ local function on_message(msg)
   elseif msg.t == "bye" then
     presence.remove_peer(msg.peer)
     local label = msg.name or (msg.peer == 0 and "host") or ("peer " .. tostring(msg.peer))
-    vim.schedule(function()
-      vim.api.nvim_out_write("live-share: " .. label .. " left\n")
-    end)
+    if follow.get_followed_peer() == msg.peer then
+      follow.disable()
+      vim.schedule(function()
+        vim.notify("live-share: " .. label .. " left — follow mode disabled", vim.log.levels.WARN)
+      end)
+    else
+      vim.schedule(function()
+        vim.api.nvim_out_write("live-share: " .. label .. " left\n")
+      end)
+    end
 
   -- ── terminal_open ─────────────────────────────────────────────────────────
   elseif msg.t == "terminal_open" then

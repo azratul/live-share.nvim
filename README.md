@@ -99,12 +99,12 @@ The rewrite was carried out with AI assistance as a development tool, with all a
     The free plan works fine.
   - `bore`: requires the [`bore`](https://github.com/ekzhang/bore) CLI
 - **P2P transport** (optional): requires the [`punch`](https://github.com/azratul/punch.lua) Lua library ≥ 0.3.2
-  (0.3.2 adds the relay fallback for symmetric/double NAT):
+  (includes container support, relay fallback, and localhost.run compatibility):
   ```bash
   luarocks install punch
   ```
 
-- **Tested Environments** (`ws` transport): Linux, OpenBSD, macOS, and Windows (Git Bash). The `punch` P2P transport is not yet stable on any platform — use `ws` for production sessions.
+- **Tested Environments** (`ws` transport): Linux, OpenBSD, macOS, and Windows (Git Bash). The `punch` P2P transport is tested on Linux with all four built-in tunnel providers; use `ws` for environments where `punch` has not been tested.
 
 ## What's new in v2.1.0
 
@@ -113,7 +113,7 @@ A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel b
 
 The P2P channel is encrypted with AES-256-GCM using the same session key that travels in the URL fragment.
 
-To use P2P transport, install punch and configure any tunnel service. The tunnel is only used during the ~5-second HTTP signaling phase, so HTTP reverse proxies (serveo, localhost.run) work just as well as TCP-level tunnels (bore, ngrok):
+To use P2P transport, install punch ≥ 0.3.2 and configure any tunnel service. The tunnel is only used during the ~5-second HTTP signaling phase, so HTTP reverse proxies (serveo, localhost.run) work just as well as TCP-level tunnels (bore, ngrok):
 
 ```lua
 require("live-share").setup({
@@ -127,7 +127,7 @@ require("live-share").setup({
 ## What's new in v2.0.0
 
 ### Multi-buffer workspace
-The host shares the entire workspace, not just a single file. Guests can browse and open any file via `:LiveShareWorkspace` or `:LiveShareOpen <path>`.
+The host shares the entire workspace, not just a single file. Guests can browse and open any file via `:LiveShareWorkspace` (fuzzy picker if telescope-ui-select, fzf-lua, or snacks is installed; collapsible tree otherwise) or `:LiveShareOpen <path>`.
 
 ### E2E encryption
 Sessions are encrypted with AES-256-GCM via OpenSSL (LuaJIT FFI). The session key travels in the URL fragment (`#key=…`) and never reaches the tunnel server.
@@ -237,7 +237,7 @@ EOF
 | `:LiveShareJoin <url> [port]` | Guest | Join a session by URL. |
 | `:LiveShareStop` | Both | End the active session. |
 | `:LiveShareTerminal` | Host | Open a shared terminal. Guests receive it automatically. |
-| `:LiveShareWorkspace` | Guest | Browse the host's workspace file tree. |
+| `:LiveShareWorkspace` | Guest | Browse the host's workspace. Uses `vim.ui.select` if a fuzzy finder plugin is active; collapsible tree otherwise. |
 | `:LiveShareOpen <path>` | Guest | Open a specific file from the workspace. |
 | `:LiveShareFollow [peer_id]` | Both | Follow a peer's active buffer (no arg = follow host). |
 | `:LiveShareUnfollow` | Both | Stop following. |
@@ -332,12 +332,12 @@ For the full semantics, known limitations, and convergence guarantees, see [§3 
 | Guest approval and roles | **Stable** | RW / RO per guest, prompted via `vim.ui.select` |
 | Protocol v3 | **Stable** | Spec in [PROTOCOL.md](./PROTOCOL.md); version negotiation in [COMPATIBILITY.md](./COMPATIBILITY.md) |
 | Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
-| Follow mode | **Beta** | Buffer tracking works; minor edge cases on rapid switches |
-| Workspace browser | **Beta** | File tree and open-by-path work; large workspaces untested |
-| `punch` P2P transport | **Experimental** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua); relay fallback for symmetric/double NAT under active development — not yet stable |
+| Follow mode | **Stable** | Host and guest follow; auto-disables when followed peer disconnects |
+| Workspace browser | **Stable** | Collapsible tree or fuzzy picker (auto-detected); initial sync is slow on very large workspaces |
+| `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua) ≥ 0.3.2; direct + relay paths work on Linux with all built-in providers; other platforms not yet tested |
 | Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
 
-The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport is still under active development — relay fallback for symmetric/double NAT is not yet reliable. Everything else may have rough edges. Issues and feedback are welcome.
+The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport (≥ 0.3.2) is tested on Linux with all four built-in tunnel providers; relay fallback for symmetric/double NAT works end-to-end. Other platforms and edge-case NAT topologies may still have rough edges. Issues and feedback are welcome.
 
 ## Contributing
 
