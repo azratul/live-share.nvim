@@ -250,6 +250,11 @@ function M.debug_info()
     lines[#lines + 1] = "session         : active (" .. (session.role or "unknown") .. ")"
     lines[#lines + 1] = "peer id         : " .. tostring(session.peer_id or "n/a")
     lines[#lines + 1] = "session id      : " .. tostring(session.sid or "n/a")
+    if session.role == "host" then
+      local ok_t, tunnel = pcall(require, "live-share.tunnel")
+      local share_url = ok_t and tunnel.last_url
+      lines[#lines + 1] = "share url       : " .. (share_url or "(tunnel not ready yet)")
+    end
   else
     lines[#lines + 1] = "session         : none"
   end

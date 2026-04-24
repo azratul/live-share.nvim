@@ -116,6 +116,7 @@ function M.start(port, opts)
           local ok_host, h = pcall(require, "live-share.host")
           local key_frag = (ok_host and h.get_key_fragment()) or ""
           url = url_prefix .. url .. key_frag
+          M.last_url = url
 
           if vim.fn.has("clipboard") == 1 then
             local clipboard_ok = pcall(vim.fn.setreg, "+", url)
@@ -151,6 +152,7 @@ function M.stop()
     vim.fn.jobstop(M.config.ssh_pid)
     M.config.ssh_pid = nil
   end
+  M.last_url = nil
 end
 
 return M
