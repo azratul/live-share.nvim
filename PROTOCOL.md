@@ -4,6 +4,42 @@ This document describes the communication protocol used by `live-share.nvim`. It
 
 ---
 
+## Architecture overview
+
+### `ws` transport (default)
+
+```
+  Host (Neovim)                  Tunnel / relay                   Guest (Neovim)
+  ─────────────                  ──────────────                   ──────────────
+       │                    TCP/WebSocket or raw TCP                    │
+       │◄─────────────────────────────────────────────────────────────►│
+       │              serveo · localhost.run · ngrok · bore             │
+       │                                                                │
+       │◄══════════════ AES-256-GCM (key never reaches relay) ════════►│
+
+  Session key: URL fragment only — https://…#key=<base64url>
+  The relay sees opaque ciphertext and cannot read or modify content.
+```
+
+### `punch` transport (P2P UDP)
+
+```
+  Host (Neovim)          Tunnel (signaling only ~5 s)          Guest (Neovim)
+  ─────────────          ────────────────────────────          ──────────────
+       │──── STUN ──────►  HTTP signaling server  ◄──── STUN ────────│
+       │                   (any tunnel provider)                      │
+       │◄═════════════════ direct AES-256-GCM UDP ══════════════════►│
+                             (relay not involved)
+```
+
+After the signaling phase the tunnel is no longer in the data path. Both peers communicate directly over an encrypted UDP channel using the same session key.
+
+### Encryption boundary
+
+The session key is a 32-byte random value encoded as `base64url` in the URL fragment (`#key=…`). URL fragments are never sent in HTTP requests, so the key never reaches the tunnel server. Every message payload is wrapped as `[12-byte nonce][AES-256-GCM ciphertext+tag]` (§2.2). The relay sees only opaque byte streams.
+
+---
+
 ## 1. Transport Layer
 
 The protocol supports three transport modes. For WS and TCP the server auto-detects the mode from the first 4 bytes of the connection. For Punch the transport is indicated by the `punch+` URL prefix and uses a separate signaling flow.
@@ -640,3 +676,25 @@ When a breaking protocol change ships:
 ### Terminal input encoding
 
 The `data` field of `terminal_input` is a raw byte string (UTF-8). Control sequences (e.g. `\u0003` for Ctrl+C, `\u001b[A` for arrow-up) are included verbatim and must not be escaped or transformed. The host passes the bytes directly to the PTY via `chansend` without any modification; the guest must do the same in the opposite direction.
+
+---
+
+## 11. Design decisions
+
+This section documents the key trade-offs made when designing the protocol. It is informational only and does not affect wire compatibility.
+
+### Why WebSocket instead of raw TCP for the default transport
+
+HTTP tunnel providers (serveo.net, localhost.run) are HTTP reverse proxies — they speak HTTP/1.1 and require a valid `Upgrade: websocket` handshake before forwarding arbitrary byte streams. Raw TCP connections sent through these tunnels are rejected or corrupted at the proxy layer. The server therefore auto-detects the transport from the first 4 bytes of each connection: `"GET "` indicates a WebSocket upgrade; any other value is treated as a raw TCP connection with a 4-byte length prefix. This keeps both modes behind a single port and allows ngrok (TCP mode) and bore to work without WebSocket overhead.
+
+### Why AES-256-GCM via LuaJIT FFI instead of a Lua library
+
+Neovim has LuaJIT available everywhere, and OpenSSL is present on virtually every system that runs Neovim. Binding to `libcrypto` via FFI costs a few lines of C-style declarations and avoids pulling in a native Lua extension (which would require a compiler on every install). AES-256-GCM gives authenticated encryption in a single pass; the 12-byte random nonce per message means key reuse is not a concern in practice. The session key never leaves the URL fragment and never reaches the tunnel server.
+
+### Why line-level last-write-wins instead of CRDT or OT
+
+The expected collaboration pattern is one active author with one or more observers, or light turn-based editing — not simultaneous heavy editing of the same lines by multiple people. A CRDT (e.g. YATA, RGA) or operational transform would handle concurrent same-line edits gracefully but adds significant complexity: persistent document state, tombstones or history vectors, and a non-trivial merge function. LWW with host-assigned monotonic sequence numbers achieves full convergence for the common case, is easy to reason about, and is straightforward to implement in any language. The trade-off is documented explicitly in §3 so users know what to expect.
+
+### Why no external plugin dependencies
+
+The WebSocket handshake, including SHA-1 for `Sec-WebSocket-Accept`, is implemented in pure Lua. The alternative — depending on a third-party Neovim library just for a one-time handshake — would add an install-time dependency for a single operation. The pure-Lua SHA-1 implementation is small, self-contained, and covered by the test suite against the RFC 6455 test vector.

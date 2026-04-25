@@ -65,22 +65,6 @@ This project is currently a work in progress and has not been tested by this plu
 
 If you're interested in cross-editor collaboration between Neovim and VS Code, keep an eye on `open-pair` as it evolves.
 
-### Removal of the instant.nvim dependency
-
-Previous versions relied on [jbyuki/instant.nvim](https://github.com/jbyuki/instant.nvim) as the collaborative editing engine. That dependency was removed for two reasons:
-
-- **The project appears abandoned.** `instant.nvim` has not received updates in four years and no longer seems actively maintained, which makes relying on it risky.
-- **Encryption was a hard requirement.** The plugin routes traffic through third-party reverse SSH tunneling services (serveo.net, localhost.run, ngrok). Sending plaintext editor content through those servers is not acceptable, and instant.nvim offered no path to support end-to-end encryption.
-
-Replacing `instant.nvim` meant reimplementing the entire collaboration layer from scratch. The key design decisions were:
-
-- **WebSocket over plain TCP** — required because HTTP tunnel providers (serveo, localhost.run) act as HTTP reverse proxies and reject raw TCP. The server auto-detects WebSocket vs. raw TCP from the first 4 bytes of each connection, keeping both modes behind the same port.
-- **AES-256-GCM via LuaJIT FFI** — chosen to avoid a Lua native extension dependency while still getting authenticated encryption. Each message carries a fresh 12-byte nonce; the session key never leaves the URL fragment.
-- **Line-level last-write-wins with host-assigned sequence numbers** — deliberately simple. A CRDT would handle concurrent edits more gracefully, but adds significant complexity for a use case where one participant is almost always the authority. The host's monotonic `seq` counter is sufficient for the expected collaboration patterns.
-- **No external plugin dependencies** — the WebSocket handshake (including SHA-1 for `Sec-WebSocket-Accept`) is implemented in pure Lua to avoid pulling in a third-party library for a single handshake operation.
-
-The rewrite was carried out with AI assistance as a development tool, with all architectural decisions, protocol design, and code review done by the maintainer.
-
 ### Requirements
 
 - **Neovim 0.9+**
@@ -101,43 +85,7 @@ The rewrite was carried out with AI assistance as a development tool, with all a
 
 - **Tested Environments** (`ws` transport): Linux, OpenBSD, macOS, and Windows (Git Bash). The `punch` P2P transport is tested on Linux with all four built-in tunnel providers; use `ws` for environments where `punch` has not been tested.
 
-## What's new in v2.1.0
-
-### P2P transport via punch.lua
-A new `transport = "punch"` mode establishes a direct peer-to-peer UDP channel between host and guest using NAT hole-punching ([punch.lua](https://github.com/azratul/punch.lua)). The tunnel is used only during the ~5-second signaling phase; all collaborative traffic flows over a direct encrypted UDP channel afterwards, bypassing the tunnel server entirely. When direct hole-punching fails (e.g. symmetric NAT or double NAT), the session automatically falls back to a relay broker hosted on the same signaling server — no extra configuration required.
-
-The P2P channel is encrypted with AES-256-GCM using the same session key that travels in the URL fragment.
-
-To use P2P transport, install punch ≥ 0.3.2 and configure any tunnel service. The tunnel is only used during the ~5-second HTTP signaling phase, so HTTP reverse proxies (serveo, localhost.run) work just as well as TCP-level tunnels (bore, ngrok):
-
-```lua
-require("live-share").setup({
-  transport = "punch",
-  service   = "bore",   -- or "ngrok", "serveo.net", "nokey@localhost.run"
-  stun      = { "stun.l.google.com:19302", "stun1.l.google.com:19302" },
-  username  = "your-name",
-})
-```
-
-## What's new in v2.0.0
-
-### Multi-buffer workspace
-The host shares the entire workspace, not just a single file. Guests can browse and open any file via `:LiveShareWorkspace` (fuzzy picker if telescope-ui-select, fzf-lua, or snacks is installed; collapsible tree otherwise) or `:LiveShareOpen <path>`.
-
-### E2E encryption
-Sessions are encrypted with AES-256-GCM via OpenSSL (LuaJIT FFI). The session key travels in the URL fragment (`#key=…`) and never reaches the tunnel server.
-
-### Remote cursors and selections
-Each peer's cursor is rendered as a labeled EOL marker in a per-peer highlight color. When a peer enters visual mode (`v`, `V`, `^V`), the selected range is highlighted in their color in every other participant's buffer in real time.
-
-### Shared terminal
-`:LiveShareTerminal` (host only) spawns a PTY shell locally and streams its I/O to all guests. Guests receive a fully interactive terminal buffer — their keystrokes are forwarded to the host's shell over the same encrypted connection.
-
-### Guest approval and roles
-The host is prompted to approve or deny each incoming connection and can assign a **Read/Write** or **Read-only** role per guest.
-
-### Follow mode
-`:LiveShareFollow [peer_id]` switches your active buffer to track another participant's movements in real time. Omit the peer ID to follow the host.
+For a detailed summary of what changed in each release, see [CHANGELOG.md](./CHANGELOG.md).
 
 ## Installation
 
@@ -291,31 +239,9 @@ require("live-share").setup({ service = "bore" })
 
 ## Protocol overview
 
-For a detailed technical specification of the communication layer, message schemas, and synchronization strategy, see [PROTOCOL.md](./PROTOCOL.md).
+For the full specification — transport modes, encryption envelope, message schemas, synchronization semantics, and edge cases — see [PROTOCOL.md](./PROTOCOL.md).
 
-- **Transport**: Two modes available:
-  - `ws` (default): WebSocket over TCP. Auto-detects WebSocket vs. raw TCP from the first 4 bytes — WebSocket for HTTP tunnel providers (serveo, localhost.run), raw length-prefixed TCP for direct connections and ngrok.
-  - `punch`: Direct P2P UDP via NAT hole-punching (punch.lua => `luarocks intall punch` or `luarocks install --local punch`). The tunnel exposes only the HTTP signaling server (~5 s); all subsequent traffic flows peer-to-peer. Compatible with any tunnel provider (bore, ngrok, serveo, localhost.run).
-- **Encryption**: `[12-byte nonce][AES-256-GCM ciphertext+tag]` per message. For `ws`, encryption is applied at the protocol layer; for `punch`, the channel layer handles it. Required — sessions will not start if OpenSSL is unavailable.
-- **Buffer sync**: line-level last-write-wins. The host assigns a monotonic sequence number to every patch and is the ordering authority.
-- **Shared terminal**: PTY I/O streamed over the same encrypted connection as all other session events.
-
-### Conflict model
-
-The plugin uses **line-level last-write-wins**: the host is the sole ordering authority and applies guest edits in the order they arrive over TCP/UDP. If two participants edit the same line simultaneously, one edit wins (whichever reached the host first) and the other is silently overwritten. After all broadcasts are applied, every peer converges to identical state — there are no permanent divergences.
-
-**What this means in practice:**
-
-| Scenario | Result |
-|----------|--------|
-| Two users edit different lines simultaneously | Safe — no interference |
-| Two users edit the same line simultaneously | One edit is lost (arrival order at host decides) |
-| High-latency connection (> 200 ms) | Conflict window is larger; same-line edits less reliable |
-| Read-only guest (`role: ro`) | Cannot cause conflicts; receives authoritative stream only |
-
-This is a deliberate trade-off. The expected collaboration pattern is one active author with observers, or light turn-based editing. For use cases requiring true simultaneous editing of the same lines, a CRDT-based protocol would be more appropriate at significantly higher implementation complexity.
-
-For the full semantics, known limitations, and convergence guarantees, see [§3 of PROTOCOL.md](./PROTOCOL.md#3-synchronization-strategy).
+The sync model is **line-level last-write-wins**: the host assigns a monotonic `seq` to every patch and is the sole ordering authority. Non-overlapping edits are always safe. Concurrent edits to the same line are resolved by arrival order at the host; one edit silently wins. See [§3 of PROTOCOL.md](./PROTOCOL.md#3-synchronization-strategy) for the convergence guarantees and known limitations.
 
 ## Stability matrix
 
