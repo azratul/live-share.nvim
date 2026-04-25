@@ -11,10 +11,10 @@ This document describes the communication protocol used by `live-share.nvim`. It
 ```
   Host (Neovim)                  Tunnel / relay                   Guest (Neovim)
   ─────────────                  ──────────────                   ──────────────
-       │                    TCP/WebSocket or raw TCP                    │
+       │                    TCP/WebSocket or raw TCP                   │
        │◄─────────────────────────────────────────────────────────────►│
-       │              serveo · localhost.run · ngrok · bore             │
-       │                                                                │
+       │              serveo · localhost.run · ngrok · bore            │
+       │                                                               │
        │◄══════════════ AES-256-GCM (key never reaches relay) ════════►│
 
   Session key: URL fragment only — https://…#key=<base64url>
@@ -27,7 +27,7 @@ This document describes the communication protocol used by `live-share.nvim`. It
   Host (Neovim)          Tunnel (signaling only ~5 s)          Guest (Neovim)
   ─────────────          ────────────────────────────          ──────────────
        │──── STUN ──────►  HTTP signaling server  ◄──── STUN ────────│
-       │                   (any tunnel provider)                      │
+       │                   (any tunnel provider)                     │
        │◄═════════════════ direct AES-256-GCM UDP ══════════════════►│
                              (relay not involved)
 ```
