@@ -335,6 +335,29 @@ For the full semantics, known limitations, and convergence guarantees, see [§3 
 
 The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport (≥ 0.3.2) is tested on Linux with all four built-in tunnel providers; relay fallback for symmetric/double NAT works end-to-end. Other platforms and edge-case NAT topologies may still have rough edges. Issues and feedback are welcome.
 
+## Test coverage
+
+The test suite runs under [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) and covers the following areas:
+
+| Suite | What it tests |
+|-------|---------------|
+| `tests/crypto/` | AES-256-GCM key generation, encrypt/decrypt round-trips, wrong-key and tamper detection, nonce uniqueness, base64url encoding |
+| `tests/websocket/` | HTTP upgrade handshake (request and response headers, `Sec-WebSocket-Accept` against the RFC 6455 test vector), binary frame encode/decode, 16-bit length extension, fragmentation across chunks, client-side masking |
+| `tests/protocol/` | JSON message codec, encrypted round-trips, wrong-key rejection, fixture validation for all message types (`hello`, `patch`, `cursor`, `terminal_data`, `bye`) |
+| `tests/transport/` | TCP framing (4-byte little-endian length prefix): encoding, multi-message reassembly, byte-by-byte delivery; WS framing layer: masked and unmasked round-trips |
+| `tests/connection/` | Listener interface contract — confirms `new_listener` and `new_punch_listener` expose the required method set |
+| `tests/integration/` | Real TCP server/client over loopback: connect events, message delivery, broadcast to 2 and 3 simultaneous peers (TCP and mixed TCP+WS), AES-256-GCM encrypted sessions, sequential patch ordering, concurrent patches from multiple guests, abrupt-disconnect `bye` synthesis and re-broadcast (§7.3), read-only role enforcement, connection rejection, `except_peer` exclusion |
+
+Run the full suite:
+
+```bash
+nvim --headless \
+  -u tests/minimal_init.lua \
+  -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
+```
+
+Network behavior (TCP connect, WebSocket handshake, broadcast, encryption) is covered by the integration suite. Neovim UI interactions (extmarks, `vim.ui.select`, cursor rendering) require two live Neovim instances and are covered by the [local smoke test](./TROUBLESHOOTING.md#local-two-instance-smoke-test-no-tunnel-required) in TROUBLESHOOTING.md.
+
 ## Known limitations
 
 - **Simultaneous edits to the same line** — the sync model is line-level last-write-wins with the host as ordering authority. If two participants edit the same line at the same time, one edit is silently overwritten. For conflict-free collaboration, use read-only guests or coordinate turns explicitly.
