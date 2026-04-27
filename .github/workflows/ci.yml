@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, nightly, develop]
   pull_request:
-    branches: [main]
+    branches: [main, nightly]
 
 jobs:
   lint:
@@ -21,20 +21,21 @@ jobs:
           args: --check lua/ plugin/
 
   test:
-    name: Unit tests (${{ matrix.os }})
+    name: Unit tests (${{ matrix.os }}, nvim-${{ matrix.nvim }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        nvim: [stable, nightly]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Neovim (stable)
+      - name: Install Neovim (${{ matrix.nvim }})
         uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
-          version: stable
+          version: ${{ matrix.nvim }}
 
       - name: Install plenary.nvim (Unix)
         if: matrix.os != 'windows-latest'
