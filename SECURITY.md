@@ -73,6 +73,73 @@ Before a guest can receive any session data, the host is prompted to approve the
 
 ---
 
+## Malicious actor scenarios
+
+### Malicious guest
+
+A guest who obtained the session URL and was approved by the host can:
+
+- Send arbitrary protocol messages to the server.
+- If approved as **read-write**: apply patches to the host's buffer — the same capability as a trusted RW guest. There is no content filtering.
+- If approved as **read-only**: patch messages are dropped by the server before reaching the host's message handler (`server.lua`). The guest cannot escalate to RW without a new host approval.
+- Send malformed or crafted messages. `protocol.decode` returns `nil` for invalid JSON or failed GCM authentication; such messages are silently discarded and do not crash the host.
+- Spam cursor or terminal events. There is no rate limiting on incoming messages.
+
+A malicious guest **cannot**:
+
+- Decrypt sessions they are not part of (each session has an independent key).
+- Forge messages that pass GCM authentication without the session key.
+- Silently re-join after being disconnected — the host must approve each connection attempt.
+
+### Malicious host
+
+The guest trusts the host entirely. A malicious host can:
+
+- Send arbitrary file content via `workspace_info` and `file_response`.
+- Write arbitrary data to the guest's terminal buffer via `terminal_data`.
+- Observe all guest edits, cursor positions, and keystrokes sent to the shared terminal.
+- Assign a read-only role and then send patches — guests apply what they receive.
+
+There is no mechanism for a guest to verify the host's identity or the integrity of the workspace content beyond the shared session key. **Do not join sessions from untrusted hosts.**
+
+### Compromised relay / tunnel server
+
+With the `ws` transport, a compromised relay can:
+
+- Observe connection timing, byte volumes, and guest IP addresses.
+- Drop or delay packets (denial of service).
+- Inject arbitrary bytes into the TCP stream. Injected bytes will fail GCM authentication and be discarded, but can disrupt framing.
+
+A compromised relay **cannot**:
+
+- Read session content — all payloads are AES-256-GCM ciphertext.
+- Inject valid messages without the session key.
+- Obtain the session key — it travels in the URL fragment and is never sent over the network.
+
+With the `punch` transport, the signaling phase (~5 s) and any relay fallback still pass through the configured tunnel provider — a compromised tunnel has the same capabilities listed above. Once direct hole-punching succeeds, all subsequent collaborative traffic flows over a direct UDP channel between host and guest, bypassing the tunnel entirely. The session key remains out of reach in both cases.
+
+---
+
+## In scope / Out of scope
+
+**In scope** — what this plugin is designed to protect:
+
+- Confidentiality of buffer content, file content, terminal I/O, and cursor positions against passive observers and tunnel servers.
+- Integrity of messages in transit (AES-256-GCM authentication tag).
+- Session key confidentiality from tunnel servers (URL fragment semantics).
+- Role enforcement: read-only guests cannot apply patches to the host's buffer.
+
+**Out of scope** — what this plugin explicitly does not protect against:
+
+- A malicious approved host.
+- Denial-of-service via message flooding.
+- Guests sharing the session URL with unauthorized third parties.
+- Forward secrecy: a session URL leaked after the fact can be used to decrypt logged traffic.
+- Key rotation within an active session.
+- Authentication of participants beyond URL possession and host approval.
+
+---
+
 ## Assumptions and limitations
 
 - **OpenSSL must be present.** The plugin uses LuaJIT FFI to call into `libcrypto`. If OpenSSL is not available, the session is aborted.
