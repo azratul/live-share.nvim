@@ -15,7 +15,7 @@
 
 This plugin brings VS Code-like Live Share functionality natively to Neovim: real-time collaborative editing, remote cursors and selections, shared terminals, and E2E encryption — with no external plugin dependencies.
 
-> Note: This plugin is designed to work exclusively between Neovim instances and is not compatible with Visual Studio Code Live Share sessions. However, the underlying protocol is now publicly available, allowing developers of VS Code or any other editor to build their own client implementation and interoperate with the collaboration system. In that sense, while the plugin itself is Neovim-focused, the protocol is now editor-independent and open to broader ecosystem adoption.
+> Note: This plugin is not compatible with Microsoft Visual Studio Code Live Share sessions. However, the underlying `live-share.nvim` protocol is open and editor-independent. Cross-editor collaboration with VS Code is supported through compatible clients such as [open-pair](https://github.com/darkerthanblack2000/open-pair), which has been tested successfully with `live-share.nvim` as both host and guest.
 
 ## Quick Start
 
@@ -59,11 +59,16 @@ See the [Installation](#installation) section for packer.nvim, vim-plug, and alt
 
 ## Editor interoperability
 
-There is also early work on a VS Code client built around the `azratul/live-share.nvim` protocol: [open-pair](https://github.com/darkerthanblack2000/open-pair).
+`live-share.nvim` can interoperate with other editors through the open collaboration protocol described in [PROTOCOL.md](./PROTOCOL.md).
 
-This project is currently a work in progress and has not been tested by this plugin's maintainer. Compatibility should therefore be considered experimental for now.
+The VS Code client [open-pair](https://github.com/darkerthanblack2000/open-pair) has been tested successfully with `live-share.nvim` in both directions:
 
-If you're interested in cross-editor collaboration between Neovim and VS Code, keep an eye on `open-pair` as it evolves.
+- `live-share.nvim` as host and `open-pair` as guest.
+- `open-pair` as host and `live-share.nvim` as guest.
+
+Cross-platform sessions have also been tested between Windows and Linux, with participants using different editors — Neovim and VS Code — on either side.
+
+This means Neovim ↔ VS Code collaboration is supported when both clients implement the compatible protocol version. For details about protocol compatibility and version negotiation, see [COMPATIBILITY.md](./COMPATIBILITY.md).
 
 ### Requirements
 
@@ -257,7 +262,7 @@ The sync model is **line-level last-write-wins**: the host assigns a monotonic `
 | Workspace browser | **Stable** | Collapsible tree or fuzzy picker (auto-detected); initial sync is slow on very large workspaces |
 | Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
 | `punch` P2P transport | **Beta** | NAT hole-punching via [punch.lua](https://github.com/azratul/punch.lua) ≥ 0.3.2; direct + relay paths work on Linux with all built-in providers; other platforms not yet tested |
-| Cross-editor interop (open-pair) | **Experimental** | Third-party VS Code client; not tested by this maintainer |
+| Cross-editor interop (open-pair) | **Tested** | Verified with `live-share.nvim` as host and guest, including Windows ↔ Linux sessions with Neovim and VS Code |
 
 The `ws` transport, encryption, and buffer sync are the most exercised paths and can be considered production-ready for same-version peers on Linux, macOS, and Windows. The `punch` transport (≥ 0.3.2) is tested on Linux with all four built-in tunnel providers; relay fallback for symmetric/double NAT works end-to-end. Other platforms and edge-case NAT topologies may still have rough edges. Issues and feedback are welcome.
 
