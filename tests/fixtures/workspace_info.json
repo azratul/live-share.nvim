@@ -1,0 +1,5 @@
+{
+  "t": "workspace_info",
+  "root_name": "my-project",
+  "files": ["src/main.lua", "README.md", "lua/plugin/init.lua"]
+}

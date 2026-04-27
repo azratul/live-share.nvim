@@ -1,0 +1,7 @@
+{
+  "t": "open_files_snapshot",
+  "files": [
+    { "path": "src/main.lua", "lines": ["local M = {}", "", "return M"] },
+    { "path": "README.md",    "lines": ["# my-project", "", "Work in progress."] }
+  ]
+}

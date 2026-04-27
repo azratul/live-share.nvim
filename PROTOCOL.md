@@ -698,3 +698,102 @@ The expected collaboration pattern is one active author with one or more observe
 ### Why no external plugin dependencies
 
 The WebSocket handshake, including SHA-1 for `Sec-WebSocket-Accept`, is implemented in pure Lua. The alternative — depending on a third-party Neovim library just for a one-time handshake — would add an install-time dependency for a single operation. The pure-Lua SHA-1 implementation is small, self-contained, and covered by the test suite against the RFC 6455 test vector.
+
+---
+
+## 12. Patch Operation Reference
+
+This section is aimed at third-party client implementors. It describes how to encode and decode `patch` messages precisely.
+
+### Line indexing
+
+All line numbers in `patch`, `cursor`, and snapshot messages are **0-indexed**. The first line of a file is `lnum: 0`.
+
+### Applying a patch
+
+A patch replaces `count` lines starting at `lnum` with the content of `lines`:
+
+```
+buffer[lnum : lnum + count] = lines
+```
+
+This maps directly to `nvim_buf_set_lines(buf, lnum, lnum + count, false, lines)`.
+
+| Field | Meaning |
+|:---|:---|
+| `lnum` | First line to replace (0-indexed, inclusive) |
+| `count` | Number of lines to remove (0 = pure insertion) |
+| `lines` | Replacement lines; may have a different length than `count` |
+
+Special value: **`count = -1`** replaces the entire buffer (equivalent to `lnum = 0, end = -1`).
+
+### Operation examples
+
+All examples start from this 5-line buffer:
+
+```
+0: "line 1"
+1: "line 2"
+2: "line 3"
+3: "line 4"
+4: "line 5"
+```
+
+**Insert a line** (between "line 2" and "line 3"):
+```json
+{ "lnum": 2, "count": 0, "lines": ["new line"] }
+```
+→ `["line 1", "line 2", "new line", "line 3", "line 4", "line 5"]`
+
+**Delete a line** (remove "line 3"):
+```json
+{ "lnum": 2, "count": 1, "lines": [] }
+```
+→ `["line 1", "line 2", "line 4", "line 5"]`
+
+**Replace a line** ("line 3" → "replacement"):
+```json
+{ "lnum": 2, "count": 1, "lines": ["replacement"] }
+```
+→ `["line 1", "line 2", "replacement", "line 4", "line 5"]`
+
+**Multi-line replace** (replace lines 1–3 with two lines):
+```json
+{ "lnum": 1, "count": 3, "lines": ["new 2", "new 3"] }
+```
+→ `["line 1", "new 2", "new 3", "line 5"]`
+
+**Append at end** (buffer has 5 lines, so the next index is 5):
+```json
+{ "lnum": 5, "count": 0, "lines": ["last line"] }
+```
+→ `["line 1", "line 2", "line 3", "line 4", "line 5", "last line"]`
+
+Set `lnum` to the current line count to append after the last line.
+
+**Full buffer replace**:
+```json
+{ "lnum": 0, "count": -1, "lines": ["only line"] }
+```
+→ `["only line"]`
+
+**Clear buffer** (replace with a single empty line — buffers always have at least one line):
+```json
+{ "lnum": 0, "count": -1, "lines": [""] }
+```
+
+### Line endings
+
+Lines in `lines` arrays are stored **without line terminators**. Before encoding a patch, strip any trailing `\n` or `\r\n` from each line. When applying a received patch, do not add line terminators to the stored lines. The protocol is LF-agnostic at the wire level: all normalization is the client's responsibility.
+
+### Empty files
+
+An empty file is represented as `"lines": [""]` — a single empty string. This follows the Neovim buffer model where a buffer always has at least one line. Clients receiving `"lines": []` in an `open_files_snapshot` or `file_response` should treat it as equivalent to `[""]`.
+
+### Host rebroadcast to sender
+
+The host broadcasts every applied patch to **all connected peers, including the peer that originated it**. Guests must not apply their own edits optimistically and rely on local state as authoritative. A guest's outgoing patch (sent without a `seq`) is considered pending until the matching host broadcast arrives with an assigned `seq`. Only at that point should the guest treat the edit as committed.
+
+### Protocol fixtures
+
+Reference payloads for all message types are available in [`tests/fixtures/`](./tests/fixtures/). These are static JSON files suitable for validating a parser or testing a handshake implementation against known-good inputs. Encryption fixtures (raw key → nonce → ciphertext) are not included; the encryption envelope is described in §2.2.

@@ -1,0 +1,7 @@
+{
+  "t": "file_response",
+  "path": "src/main.lua",
+  "lines": ["local M = {}", "", "function M.hello()", "  print('hello')", "end", "", "return M"],
+  "readonly": false,
+  "req_id": 1
+}

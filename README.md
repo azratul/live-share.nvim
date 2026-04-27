@@ -274,7 +274,7 @@ The test suite runs under [plenary.nvim](https://github.com/nvim-lua/plenary.nvi
 |-------|---------------|
 | `tests/crypto/` | AES-256-GCM key generation, encrypt/decrypt round-trips, wrong-key and tamper detection, nonce uniqueness, base64url encoding |
 | `tests/websocket/` | HTTP upgrade handshake (request and response headers, `Sec-WebSocket-Accept` against the RFC 6455 test vector), binary frame encode/decode, 16-bit length extension, fragmentation across chunks, client-side masking |
-| `tests/protocol/` | JSON message codec, encrypted round-trips, wrong-key rejection, fixture validation for all message types (`hello`, `patch`, `cursor`, `terminal_data`, `bye`) |
+| `tests/protocol/` | JSON message codec, encrypted round-trips, wrong-key rejection, fixture validation for all message types (`connect`, `hello`, `hello_ack`, `patch`, `cursor`, `terminal_data`, `bye`, `workspace_info`, `file_request`, `file_response`, `open_files_snapshot`) |
 | `tests/transport/` | TCP framing (4-byte little-endian length prefix): encoding, multi-message reassembly, byte-by-byte delivery; WS framing layer: masked and unmasked round-trips |
 | `tests/connection/` | Listener interface contract — confirms `new_listener` and `new_punch_listener` expose the required method set |
 | `tests/integration/` | Real TCP server/client over loopback: connect events, message delivery, broadcast to 2 and 3 simultaneous peers (TCP and mixed TCP+WS), AES-256-GCM encrypted sessions, sequential patch ordering, concurrent patches from multiple guests, abrupt-disconnect `bye` synthesis and re-broadcast (§7.3), read-only role enforcement, connection rejection, `except_peer` exclusion |
