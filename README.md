@@ -13,9 +13,11 @@
 
 ## Overview
 
-This plugin brings VS Code-like Live Share functionality natively to Neovim: real-time collaborative editing, remote cursors and selections, shared terminals, and E2E encryption — with no external plugin dependencies.
+A **Neovim-native, end-to-end encrypted alternative to VS Code Live Share**. Real-time collaborative editing, remote cursors and selections, and shared terminals — no Microsoft account, no telemetry, an open protocol, and self-hostable / SSH / P2P-friendly workflows.
 
-> Note: This plugin is not compatible with Microsoft Visual Studio Code Live Share sessions. However, the underlying `live-share.nvim` protocol is open and editor-independent. Cross-editor collaboration with VS Code is supported through compatible clients such as [open-pair](https://github.com/darkerthanblack2000/open-pair), which has been tested successfully with `live-share.nvim` as both host and guest.
+**Neovim ↔ VS Code collaboration is supported** through [open-pair](https://github.com/darkerthanblack2000/open-pair), tested in both directions (Neovim host ↔ VS Code guest, and VS Code host ↔ Neovim guest), including cross-platform Windows ↔ Linux sessions. See [Editor interoperability](#editor-interoperability) for details.
+
+> Note: This plugin is **not protocol-compatible with Microsoft Visual Studio Code Live Share sessions**. The `live-share.nvim` protocol is open and editor-independent — cross-editor collaboration happens through compatible clients like `open-pair`.
 
 ## Quick Start
 
@@ -198,7 +200,26 @@ After starting the server, wait for the message indicating the URL has been copi
 
 ### Preview
 
-![Live Share Preview](https://raw.githubusercontent.com/azratul/azratul/86d27acdbe36f0d4402a21e13b79fafbaec1ffc9/live-share.gif)
+1. Neovim to Neovim
+
+![Neovim to Neovim](https://raw.githubusercontent.com/azratul/azratul/main/nvim-nvim.gif)
+
+2. Cross-editor
+
+![Neovim to VS Code](https://raw.githubusercontent.com/azratul/azratul/main/nvim-vscode.gif)
+
+![VS Code to Neovim](https://raw.githubusercontent.com/azratul/azratul/main/vscode-nvim.gif)
+
+3. Shared Terminal
+
+![Neovim Shared Terminal](https://raw.githubusercontent.com/azratul/azratul/main/shared_terminal.gif)
+
+4. Follow mode
+
+![Neovim Follow Mode](https://raw.githubusercontent.com/azratul/azratul/main/follow_mode.gif)
+
+
+For step-by-step walkthroughs of common scenarios (Neovim ↔ Neovim, Neovim ↔ VS Code, LAN-only, SSH tunnel, read-only review, self-hosted relay, shared terminal), see [RECIPES.md](./RECIPES.md).
 
 ## Configuration
 
@@ -241,6 +262,8 @@ require("live-share.provider").register("bore", {
 
 require("live-share").setup({ service = "bore" })
 ```
+
+> **Privacy-first option.** You can self-host the tunnel on your own VPS (any SSH server with `GatewayPorts`, or `bore server`) so no third-party ever sees your encrypted traffic. With the `punch` transport this also gives you a self-hosted signaling and relay server "for free", since both ride on top of the chosen tunnel. See [RECIPES.md §6](./RECIPES.md#6-self-hosted-relay-privacy-first).
 
 ## Protocol overview
 

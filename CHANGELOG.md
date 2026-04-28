@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
+  Neovim ↔ Neovim, Neovim ↔ VS Code via `open-pair`, LAN-only session (custom
+  provider), SSH-tunnel session with alternative providers, read-only review
+  session, self-hosted relay (privacy-first, covers SSH server and `bore` server
+  paths and how it applies to the `punch` transport), and shared terminal session.
+- **README "Privacy-first option" callout** in the Tunnel providers section
+  pointing to the self-hosted relay recipe.
+- **Demo media slots in README** — placeholders (HTML comments) and a
+  `docs/media/` directory ready for the hero, cross-editor, shared-terminal, and
+  follow-mode GIFs.
+
+### Changed
+- **README positioning** — overview rewritten to position the project as a GPL-3.0,
+  Neovim-native, end-to-end encrypted alternative to VS Code Live Share. Cross-editor
+  collaboration with VS Code via [open-pair](https://github.com/darkerthanblack2000/open-pair)
+  is now highlighted in the overview rather than buried in a footnote.
+
+---
+
 ## [2.1.4] — 2026-04-24 (current)
 
 ### Changed
