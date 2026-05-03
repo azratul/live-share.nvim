@@ -52,6 +52,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reason: `sensitive` / `not-found-or-out-of-sandbox`),
   `patch_rejected_sensitive`, `terminal_opened`. File contents and patch
   payloads are NEVER written to the log.
+- **Shared-terminal scrollback replay on join** — when a guest is approved
+  after a `:LiveShareTerminal` was opened, the host now replays up to
+  `terminal_scrollback_bytes` (default 64 KB) of recent shell output to that
+  guest right after `open_files_snapshot`.  Previously, late-joining or
+  reconnecting guests saw a blank terminal until the shell next produced
+  output.  Implemented as a new `lua/live-share/scrollback.lua` ring buffer
+  (head/tail markers, O(1) eviction, whole-chunk drops to avoid cutting
+  mid-codepoint) plumbed into `shared_terminal.lua`.  Uses the existing
+  `terminal_open` and `terminal_data` messages — no protocol change.  Tests:
+  `tests/scrollback/scrollback_spec.lua` (7 tests) and
+  `tests/shared_terminal/snapshot_spec.lua` (6 tests).
 - **Faster workspace scan for large repos** — when the host workspace is a
   git repo, `workspace.scan()` now defers to `git ls-files -co
   --exclude-standard` for a fast, gitignore-aware listing instead of walking

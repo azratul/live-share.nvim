@@ -14,21 +14,33 @@
 local M = {}
 
 local log = require("live-share.collab.log")
+local scrollback = require("live-share.scrollback")
 local uv = vim.uv or vim.loop
+
+local DEFAULT_SCROLLBACK_BYTES = 65536
 
 local function dbg(m)
   log.dbg("terminal", m)
 end
 
--- terminals[term_id] = { chan, buf, job_id? }
+-- terminals[term_id] = { chan, buf, job_id?, name?, scrollback? }
+-- `name` and `scrollback` are host-only fields; the host uses them to replay
+-- recent shell output to peers approved after the terminal was opened.
 local terminals = {}
 local next_id = 1
 local role = nil -- "host" | "guest"
 local send_fn = nil -- broadcasts (host) or sends to host (guest)
+local scrollback_max = DEFAULT_SCROLLBACK_BYTES
 
-function M.setup(r, fn)
+function M.setup(r, fn, opts)
   role = r
   send_fn = fn
+  opts = opts or {}
+  if type(opts.scrollback_bytes) == "number" and opts.scrollback_bytes >= 0 then
+    scrollback_max = opts.scrollback_bytes
+  else
+    scrollback_max = DEFAULT_SCROLLBACK_BYTES
+  end
 end
 
 -- ── Host ─────────────────────────────────────────────────────────────────────
@@ -70,6 +82,10 @@ function M.open_host()
       end
       local output = table.concat(data, "\n")
       pcall(vim.api.nvim_chan_send, chan, output)
+      local entry = terminals[term_id]
+      if entry and entry.scrollback then
+        scrollback.append(entry.scrollback, output)
+      end
       if send_fn then
         send_fn({ t = "terminal_data", term_id = term_id, data = output })
       end
@@ -89,7 +105,13 @@ function M.open_host()
     return
   end
 
-  terminals[term_id] = { chan = chan, buf = buf, job_id = job_id }
+  terminals[term_id] = {
+    chan = chan,
+    buf = buf,
+    job_id = job_id,
+    name = shell,
+    scrollback = scrollback.new(scrollback_max),
+  }
 
   if send_fn then
     send_fn({ t = "terminal_open", term_id = term_id, name = shell })
@@ -107,6 +129,43 @@ function M.on_guest_input(term_id, data)
     return
   end
   vim.fn.chansend(t.job_id, data)
+end
+
+-- Replay every currently open shared terminal to a single peer.  Called by the
+-- host right after `open_files_snapshot` so a freshly approved guest sees both
+-- the terminals that exist and their recent scrollback, even though those
+-- `terminal_open` / `terminal_data` events were broadcast before they joined.
+-- `send_one` is invoked once per message, with the same shape used on the live
+-- broadcast path; the protocol is unchanged.
+function M.snapshot_for(send_one)
+  if not send_one then
+    return
+  end
+  for term_id, t in pairs(terminals) do
+    if t.scrollback then -- host-side terminal record
+      send_one({ t = "terminal_open", term_id = term_id, name = t.name })
+      if not scrollback.is_empty(t.scrollback) then
+        send_one({ t = "terminal_data", term_id = term_id, data = scrollback.concat(t.scrollback) })
+      end
+    end
+  end
+end
+
+-- Test hooks: insert a fake host-side terminal and feed scrollback into it
+-- without spawning a real shell.  Only used by the test suite.
+function M._test_seed_terminal(term_id, name)
+  terminals[term_id] = {
+    name = name,
+    scrollback = scrollback.new(scrollback_max),
+  }
+end
+
+function M._test_record(term_id, data)
+  local t = terminals[term_id]
+  if not (t and t.scrollback) then
+    return
+  end
+  scrollback.append(t.scrollback, data)
 end
 
 -- ── Guest ─────────────────────────────────────────────────────────────────────

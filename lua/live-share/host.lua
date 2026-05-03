@@ -251,6 +251,13 @@ local function on_message(msg, from_peer)
               end
             end
             conn:send(from_peer, { t = "open_files_snapshot", files = open_list })
+
+            -- Replay shared-terminal scrollback to the new peer.  Uses the
+            -- existing `terminal_open` / `terminal_data` messages — no
+            -- protocol change.  Only emits anything if a terminal is open.
+            require("live-share.shared_terminal").snapshot_for(function(snap_msg)
+              conn:send(from_peer, snap_msg)
+            end)
           end
         )
       end
@@ -470,7 +477,7 @@ function M.start(port)
 
   require("live-share.shared_terminal").setup("host", function(msg)
     conn:broadcast(msg)
-  end)
+  end, { scrollback_bytes = config and config.terminal_scrollback_bytes })
 
   -- Follow mode: when host follows a guest, switch to their active tracked buffer.
   follow.setup(function(path, lnum, col)

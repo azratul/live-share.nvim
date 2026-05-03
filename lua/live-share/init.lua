@@ -56,6 +56,11 @@ local defaults = {
   -- of the built-in list (.git, node_modules, target, .venv, dist, build, …).
   -- Example: { "fixtures", "snapshots" }
   scan_extra_ignore = nil,
+  -- Shared-terminal scrollback budget (host-side).  When a guest is approved
+  -- after a `:LiveShareTerminal` was opened, the host replays up to this many
+  -- bytes of recent shell output so the guest sees prior context instead of a
+  -- blank screen.  Set to 0 to disable the replay.
+  terminal_scrollback_bytes = 65536,
 }
 
 function M.setup(user_config)
