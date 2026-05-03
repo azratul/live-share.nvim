@@ -22,7 +22,8 @@ local function tmpdir()
 end
 
 local function write(path, content)
-  local fd = uv.fs_open(path, "w", 420)
+  local fd, err = uv.fs_open(path, "w", 420)
+  assert(fd, "fs_open failed for " .. tostring(path) .. ": " .. tostring(err))
   uv.fs_write(fd, content or "x", 0)
   uv.fs_close(fd)
 end
@@ -68,10 +69,13 @@ describe("workspace", function()
     end)
 
     it("rejects absolute paths", function()
-      write("/tmp/live-share-test-abs", "leak")
-      assert.is_nil(workspace.read_file("/tmp/live-share-test-abs"))
+      -- Use the cross-platform `outside` tempdir (the previous /tmp path didn't
+      -- exist on Windows runners and made the test crash before asserting).
+      local target = outside .. "/secret.txt"
+      write(target, "leak")
+      assert.is_nil(workspace.read_file(target))
       assert.is_nil(workspace.read_file("/etc/passwd"))
-      vim.fn.delete("/tmp/live-share-test-abs")
+      assert.is_nil(workspace.read_file("C:/Windows/System32/drivers/etc/hosts"))
     end)
 
     it("rejects NUL bytes", function()
@@ -182,6 +186,122 @@ describe("workspace", function()
       write(root .. "/normal.txt", "ok")
       assert.same({ "normal.txt" }, workspace.scan())
       assert.is_nil(workspace.read_file("state.tfstate"))
+    end)
+  end)
+
+  describe("scan ignore list (walk mode)", function()
+    it("skips built-in noise dirs (target, .venv, .next, ...)", function()
+      vim.fn.mkdir(root .. "/target", "p")
+      write(root .. "/target/release.bin", "x")
+      vim.fn.mkdir(root .. "/.venv/lib", "p")
+      write(root .. "/.venv/lib/site.py", "x")
+      vim.fn.mkdir(root .. "/.next", "p")
+      write(root .. "/.next/build.json", "{}")
+      write(root .. "/src.lua", "ok")
+      assert.same({ "src.lua" }, workspace.scan())
+    end)
+
+    it("scan_extra_ignore stacks additional dir basenames", function()
+      workspace.setup({ scan_extra_ignore = { "fixtures", "snapshots" } })
+      workspace.set_root(root)
+      vim.fn.mkdir(root .. "/fixtures", "p")
+      write(root .. "/fixtures/a.txt", "x")
+      vim.fn.mkdir(root .. "/snapshots", "p")
+      write(root .. "/snapshots/b.txt", "x")
+      write(root .. "/keep.txt", "ok")
+      assert.same({ "keep.txt" }, workspace.scan())
+    end)
+  end)
+
+  describe("scan_max_files cap (walk mode)", function()
+    it("truncates results at the cap and reports truncation", function()
+      workspace.setup({ scan_max_files = 5 })
+      workspace.set_root(root)
+      for i = 1, 20 do
+        write(root .. "/" .. string.format("f%02d.txt", i), "x")
+      end
+      local files = workspace.scan()
+      assert.equals(5, #files)
+      assert.is_true(workspace.scan_was_truncated())
+    end)
+
+    it("does not flag truncation when the cap is not hit", function()
+      workspace.setup({ scan_max_files = 100 })
+      workspace.set_root(root)
+      for i = 1, 3 do
+        write(root .. "/" .. string.format("f%d.txt", i), "x")
+      end
+      assert.equals(3, #workspace.scan())
+      assert.is_false(workspace.scan_was_truncated())
+    end)
+  end)
+
+  describe("scan via git ls-files", function()
+    local function git_init(dir)
+      local cmd = string.format(
+        "git -C %q init -q && git -C %q config user.email a@b && git -C %q config user.name a",
+        dir,
+        dir,
+        dir
+      )
+      os.execute(cmd)
+    end
+
+    it("respects .gitignore when the workspace is a git repo", function()
+      if vim.fn.executable("git") ~= 1 then
+        pending("git not available")
+        return
+      end
+      git_init(root)
+      write(root .. "/.gitignore", "secret.txt\nbuild/\n")
+      write(root .. "/keep.txt", "ok")
+      write(root .. "/secret.txt", "no")
+      vim.fn.mkdir(root .. "/build", "p")
+      write(root .. "/build/out.bin", "x")
+      local files = workspace.scan()
+      table.sort(files)
+      assert.same({ ".gitignore", "keep.txt" }, files)
+    end)
+
+    it("includes untracked files (since -o is passed)", function()
+      if vim.fn.executable("git") ~= 1 then
+        pending("git not available")
+        return
+      end
+      git_init(root)
+      write(root .. "/untracked.txt", "ok")
+      local files = workspace.scan()
+      table.sort(files)
+      assert.same({ "untracked.txt" }, files)
+    end)
+
+    it("still applies the sensitive-file filter on top of git output", function()
+      if vim.fn.executable("git") ~= 1 then
+        pending("git not available")
+        return
+      end
+      git_init(root)
+      write(root .. "/cert.pem", "PRIVATE")
+      write(root .. "/normal.txt", "ok")
+      assert.same({ "normal.txt" }, workspace.scan())
+    end)
+
+    it("falls back to walk mode when scan_use_gitignore = false", function()
+      if vim.fn.executable("git") ~= 1 then
+        pending("git not available")
+        return
+      end
+      workspace.setup({ scan_use_gitignore = false })
+      workspace.set_root(root)
+      git_init(root)
+      write(root .. "/.gitignore", "secret.txt\n")
+      write(root .. "/keep.txt", "ok")
+      write(root .. "/secret.txt", "no")
+      -- Walk mode doesn't read .gitignore, so secret.txt would normally appear,
+      -- but the dotfile rule still hides .gitignore itself.
+      local files = workspace.scan()
+      table.sort(files)
+      assert.same({ "keep.txt", "secret.txt" }, files)
     end)
   end)
 end)

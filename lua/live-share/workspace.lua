@@ -5,19 +5,48 @@ local M = {}
 local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
-local MAX_DEPTH = 8
+local DEFAULT_MAX_DEPTH = 8
+local DEFAULT_MAX_FILES = 10000
 local FILE_SIZE_CAP = 5 * 1024 * 1024 -- 5 MB
+local GIT_LS_TIMEOUT_MS = 5000
 
-local IGNORE = {
+local DEFAULT_IGNORE = {
+  -- VCS
   [".git"] = true,
-  ["node_modules"] = true,
-  [".DS_Store"] = true,
-  ["__pycache__"] = true,
   [".svn"] = true,
-  ["vendor"] = true,
   [".hg"] = true,
+  -- OS / editor noise
+  [".DS_Store"] = true,
+  [".idea"] = true,
+  [".vscode"] = true,
+  -- JS / TS
+  ["node_modules"] = true,
   ["dist"] = true,
   ["build"] = true,
+  ["out"] = true,
+  [".next"] = true,
+  [".nuxt"] = true,
+  [".turbo"] = true,
+  [".parcel-cache"] = true,
+  [".cache"] = true,
+  -- Python
+  ["__pycache__"] = true,
+  [".venv"] = true,
+  ["venv"] = true,
+  [".tox"] = true,
+  [".mypy_cache"] = true,
+  [".pytest_cache"] = true,
+  [".ruff_cache"] = true,
+  -- JVM / Rust / Go / .NET
+  ["target"] = true,
+  ["bin"] = true,
+  ["obj"] = true,
+  [".gradle"] = true,
+  ["vendor"] = true,
+  -- Coverage / IaC
+  ["coverage"] = true,
+  [".nyc_output"] = true,
+  [".terraform"] = true,
 }
 
 -- ── Sensitive-file filter ─────────────────────────────────────────────────────
@@ -83,6 +112,11 @@ local SENSITIVE_PATH_PATTERNS = {
 
 local extra_patterns = {}
 local allow_sensitive = false
+local ignore_set = DEFAULT_IGNORE
+local max_depth = DEFAULT_MAX_DEPTH
+local max_files = DEFAULT_MAX_FILES
+local use_gitignore = true
+local last_scan_truncated = false
 
 local function is_sensitive(rel_path)
   if allow_sensitive or not rel_path or rel_path == "" then
@@ -128,6 +162,22 @@ function M.setup(cfg)
       end
     end
   end
+
+  max_depth = type(cfg.scan_max_depth) == "number" and cfg.scan_max_depth or DEFAULT_MAX_DEPTH
+  max_files = type(cfg.scan_max_files) == "number" and cfg.scan_max_files or DEFAULT_MAX_FILES
+  use_gitignore = cfg.scan_use_gitignore ~= false
+
+  ignore_set = {}
+  for k in pairs(DEFAULT_IGNORE) do
+    ignore_set[k] = true
+  end
+  if type(cfg.scan_extra_ignore) == "table" then
+    for _, name in ipairs(cfg.scan_extra_ignore) do
+      if type(name) == "string" and name ~= "" then
+        ignore_set[name] = true
+      end
+    end
+  end
 end
 
 function M.set_root(path)
@@ -140,6 +190,18 @@ function M.get_root()
 end
 
 -- ── Sandbox ───────────────────────────────────────────────────────────────────
+-- Normalise a filesystem path to forward slashes for comparison purposes only.
+-- On Windows, `uv.fs_realpath` returns backslash-separated paths, so we have to
+-- canonicalise both sides before testing prefix containment.  Returned values
+-- are still passed through to `fs_open`/`fs_write` in their original form,
+-- which libuv accepts on every platform.
+local function norm_sep(p)
+  if not p then
+    return p
+  end
+  return (p:gsub("\\", "/"))
+end
+
 -- Reject path traversal, absolute paths, NUL bytes, and any resolution that
 -- escapes the workspace root (including via symlinks).
 local function sandbox_check(path)
@@ -183,14 +245,16 @@ local function safe_abs(path)
 
   local candidate = root .. "/" .. path
   local rroot = real_root or uv.fs_realpath(root) or root
-  local prefix = rroot .. "/"
+  local nroot = norm_sep(rroot)
+  local nprefix = nroot .. "/"
 
   local real = uv.fs_realpath(candidate)
   if real then
-    if real == rroot then
+    local nreal = norm_sep(real)
+    if nreal == nroot then
       return nil -- candidate resolves to root itself, not a file
     end
-    if real:sub(1, #prefix) ~= prefix then
+    if nreal:sub(1, #nprefix) ~= nprefix then
       log.dbg("workspace", "rejected '" .. path .. "': escapes workspace via realpath")
       return nil
     end
@@ -205,7 +269,8 @@ local function safe_abs(path)
   if not real_parent then
     return candidate -- parent doesn't exist either; let the open syscall decide
   end
-  if real_parent ~= rroot and real_parent:sub(1, #prefix) ~= prefix then
+  local nparent = norm_sep(real_parent)
+  if nparent ~= nroot and nparent:sub(1, #nprefix) ~= nprefix then
     log.dbg("workspace", "rejected '" .. path .. "': parent dir escapes workspace")
     return nil
   end
@@ -213,15 +278,102 @@ local function safe_abs(path)
   return real_parent .. "/" .. basename
 end
 
--- Returns a flat sorted list of workspace-relative file paths.
-function M.scan()
-  if not root then
-    return {}
+-- ── Scan helpers ──────────────────────────────────────────────────────────────
+
+-- Detect whether `root` is the working tree of a git repo.
+local function is_git_repo(dir)
+  local stat = uv.fs_stat(dir .. "/.git")
+  return stat ~= nil -- regular .git dir or worktree pointer file
+end
+
+-- Run `git ls-files` synchronously and return its NUL-separated stdout, or nil
+-- on any failure (binary missing, non-zero exit, timeout).
+local function git_ls_files(dir)
+  if vim.fn.executable("git") ~= 1 then
+    return nil
+  end
+  local stdout = uv.new_pipe(false)
+  local stderr = uv.new_pipe(false)
+  local chunks = {}
+  local exited = false
+  local code = -1
+  local handle
+  handle = uv.spawn("git", {
+    args = { "-C", dir, "ls-files", "-co", "--exclude-standard", "-z" },
+    stdio = { nil, stdout, stderr },
+  }, function(c)
+    code = c
+    exited = true
+    if handle and not handle:is_closing() then
+      handle:close()
+    end
+  end)
+  if not handle then
+    stdout:close()
+    stderr:close()
+    return nil
+  end
+  stdout:read_start(function(_, chunk)
+    if chunk then
+      chunks[#chunks + 1] = chunk
+    end
+  end)
+  stderr:read_start(function() end)
+
+  vim.wait(GIT_LS_TIMEOUT_MS, function()
+    return exited
+  end, 10)
+
+  if not stdout:is_closing() then
+    stdout:read_stop()
+    stdout:close()
+  end
+  if not stderr:is_closing() then
+    stderr:read_stop()
+    stderr:close()
+  end
+
+  if not exited then
+    if handle and not handle:is_closing() then
+      handle:kill("sigkill")
+      handle:close()
+    end
+    log.dbg("workspace", "git ls-files timed out")
+    return nil
+  end
+  if code ~= 0 then
+    return nil
+  end
+  return table.concat(chunks)
+end
+
+local function scan_via_git(dir)
+  local out = git_ls_files(dir)
+  if not out then
+    return nil
   end
   local paths = {}
+  local truncated = false
+  for path in out:gmatch("([^%z]+)") do
+    if not is_sensitive(path) then
+      paths[#paths + 1] = path
+      if #paths >= max_files then
+        truncated = true
+        break
+      end
+    end
+  end
+  table.sort(paths)
+  last_scan_truncated = truncated
+  return paths
+end
+
+local function scan_via_walk(dir_root)
+  local paths = {}
+  local truncated = false
 
   local function scan_dir(dir, prefix, depth)
-    if depth > MAX_DEPTH then
+    if truncated or depth > max_depth then
       return
     end
     local handle = uv.fs_opendir(dir, nil, 256)
@@ -229,17 +381,21 @@ function M.scan()
       return
     end
 
-    while true do
+    while not truncated do
       local entries = uv.fs_readdir(handle)
       if not entries then
         break
       end
       for _, entry in ipairs(entries) do
-        if not IGNORE[entry.name] and entry.name:sub(1, 1) ~= "." then
+        if not ignore_set[entry.name] and entry.name:sub(1, 1) ~= "." then
           local rel = prefix ~= "" and (prefix .. "/" .. entry.name) or entry.name
           if entry.type == "file" then
             if not is_sensitive(rel) then
               paths[#paths + 1] = rel
+              if #paths >= max_files then
+                truncated = true
+                break
+              end
             end
           elseif entry.type == "directory" then
             scan_dir(dir .. "/" .. entry.name, rel, depth + 1)
@@ -250,9 +406,44 @@ function M.scan()
     uv.fs_closedir(handle)
   end
 
-  scan_dir(root, "", 0)
+  scan_dir(dir_root, "", 0)
   table.sort(paths)
+  last_scan_truncated = truncated
   return paths
+end
+
+-- Returns a flat sorted list of workspace-relative file paths.
+-- Strategy: when the workspace is a git repo and `scan_use_gitignore` is true
+-- (default), defer to `git ls-files -co --exclude-standard` for speed and
+-- gitignore awareness.  Falls back to a manual recursive walk otherwise.
+-- Always applies the sensitive-file filter and `scan_max_files` cap.
+function M.scan()
+  if not root then
+    return {}
+  end
+  last_scan_truncated = false
+
+  if use_gitignore and is_git_repo(root) then
+    local paths = scan_via_git(root)
+    if paths then
+      if last_scan_truncated then
+        log.dbg("workspace", "scan truncated at " .. max_files .. " files (git mode)")
+      end
+      return paths
+    end
+    log.dbg("workspace", "git ls-files unavailable; falling back to walk")
+  end
+
+  local paths = scan_via_walk(root)
+  if last_scan_truncated then
+    log.dbg("workspace", "scan truncated at " .. max_files .. " files (walk mode)")
+  end
+  return paths
+end
+
+-- True if the most recent scan() call hit the `scan_max_files` cap.
+function M.scan_was_truncated()
+  return last_scan_truncated
 end
 
 -- Read a workspace file. Returns lines table, or nil on error.

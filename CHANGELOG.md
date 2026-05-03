@@ -52,6 +52,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reason: `sensitive` / `not-found-or-out-of-sandbox`),
   `patch_rejected_sensitive`, `terminal_opened`. File contents and patch
   payloads are NEVER written to the log.
+- **Faster workspace scan for large repos** — when the host workspace is a
+  git repo, `workspace.scan()` now defers to `git ls-files -co
+  --exclude-standard` for a fast, gitignore-aware listing instead of walking
+  the whole tree. Falls back to the manual walker if `git` is unavailable,
+  fails, or `scan_use_gitignore = false`. Walk mode also gained a wider
+  default ignore set (`target`, `.venv`, `.next`, `.turbo`, `.gradle`,
+  `.terraform`, `coverage`, `bin`, `obj`, …) and a hard cap on the number of
+  files included. New options: `scan_use_gitignore` (default `true`),
+  `scan_max_files` (default 10000), `scan_max_depth` (default 8),
+  `scan_extra_ignore` (extra dir basenames). The `workspace_info` message
+  shape is unchanged — fully backwards-compatible with `open-pair`.
 - **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
   Neovim ↔ Neovim, Neovim ↔ VS Code via `open-pair`, LAN-only session (custom
   provider), SSH-tunnel session with alternative providers, read-only review
@@ -65,9 +76,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`crypto.sha256`** — exposed for the fingerprint helper, with canonical
   test vectors (empty string and `"abc"`).
 - **New tests:**
-  - `tests/workspace/workspace_spec.lua` — 17 tests covering sandbox traversal,
+  - `tests/workspace/workspace_spec.lua` — 25 tests covering sandbox traversal,
     NUL bytes, symlink escape, sensitive-file scan/read/write rules, the
-    `allow_sensitive_files` opt-out, and `extra_sensitive_patterns`.
+    `allow_sensitive_files` opt-out, `extra_sensitive_patterns`, the wider
+    walk-mode ignore list, `scan_extra_ignore`, the `scan_max_files` cap, and
+    the `git ls-files` fast path (gitignore respect, untracked inclusion,
+    sensitive filter on top of git output, and fallback when disabled).
   - `tests/audit/audit_spec.lua` — 5 tests covering disabled mode, JSONL
     append-only writes, `set_session` propagation, and `close()` semantics.
   - `tests/integration/edge_cases_spec.lua` — 1 new test: `server.kick()`

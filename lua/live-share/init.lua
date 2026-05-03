@@ -41,6 +41,21 @@ local defaults = {
   -- requests, denials, role changes, kicks).  Set to false to disable, or to a
   -- string path to override the default location.
   audit_log = true,
+  -- Workspace scan tuning (host-side; doesn't change the protocol).
+  -- `scan_use_gitignore`: when the workspace is a git repo, use `git ls-files`
+  -- to get a fast, gitignore-aware listing.  Falls back to a manual walk if
+  -- git isn't available or fails.
+  scan_use_gitignore = true,
+  -- Hard cap on the number of files included in `workspace_info`.  Protects
+  -- the editor from monorepos with hundreds of thousands of files.
+  scan_max_files = 10000,
+  -- Maximum directory recursion depth for the manual walker (git mode is not
+  -- depth-limited — git already excludes ignored subtrees).
+  scan_max_depth = 8,
+  -- Extra directory basenames to skip during the manual walk.  Stacked on top
+  -- of the built-in list (.git, node_modules, target, .venv, dist, build, …).
+  -- Example: { "fixtures", "snapshots" }
+  scan_extra_ignore = nil,
 }
 
 function M.setup(user_config)
