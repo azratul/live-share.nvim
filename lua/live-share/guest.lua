@@ -215,6 +215,10 @@ local function on_message(msg)
       vim.api.nvim_out_write(
         "live-share: connected as " .. get_username() .. role_label .. " (host: " .. (msg.host_name or "?") .. ")\n"
       )
+      local fp = session.key and crypto.fingerprint(session.key)
+      if fp then
+        vim.api.nvim_out_write("live-share: session fingerprint " .. fp .. " — verify with the host\n")
+      end
       if guest_role == "ro" then
         vim.notify("live-share: you joined as read-only — editing is disabled", vim.log.levels.WARN)
       end

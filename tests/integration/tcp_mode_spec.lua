@@ -36,7 +36,9 @@ describe("TCP mode integration", function()
     client.connect("127.0.0.1", PORT, nil, "tcp", 0, nil)
 
     assert.is_true(
-      wait_for(function() return received ~= nil end),
+      wait_for(function()
+        return received ~= nil
+      end),
       "timed out — server never received connect event (TCP mode deadlock?)"
     )
     assert.equals("connect", received.msg.t)
@@ -62,7 +64,9 @@ describe("TCP mode integration", function()
     client.connect("127.0.0.1", PORT + 1, nil, "tcp", 0, nil)
 
     assert.is_true(
-      wait_for(function() return client_received ~= nil end),
+      wait_for(function()
+        return client_received ~= nil
+      end),
       "timed out — client never received hello from server"
     )
     assert.equals("hello", client_received.t)

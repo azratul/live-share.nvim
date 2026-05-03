@@ -29,6 +29,18 @@ local defaults = {
   transport = "ws",
   -- STUN server used when transport = "punch".
   stun = "stun.l.google.com:19302",
+  -- Sandbox: when true, sensitive files (.env, SSH keys, .aws creds, *.pem,
+  -- *.key, …) are listed and served as if they didn't exist.  Defaults to true.
+  -- Set `allow_sensitive_files = true` to disable the filter.
+  allow_sensitive_files = false,
+  -- Extra Lua patterns appended to the sensitive-file filter (matched against
+  -- the workspace-relative path, with forward slashes).
+  -- Example: { "%.tfstate$", "/secrets/" }
+  extra_sensitive_patterns = nil,
+  -- Audit log: append-only JSONL log of session events (joins, leaves, file
+  -- requests, denials, role changes, kicks).  Set to false to disable, or to a
+  -- string path to override the default location.
+  audit_log = true,
 }
 
 function M.setup(user_config)

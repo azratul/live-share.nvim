@@ -303,6 +303,22 @@ function M.broadcast(msg, except_peer)
   end
 end
 
+function M.kick(peer_id)
+  local c = clients[peer_id] or pending[peer_id]
+  if not c then
+    return false
+  end
+  if not c.handle:is_closing() then
+    c.handle:close()
+  end
+  clients[peer_id] = nil
+  pending[peer_id] = nil
+  peer_roles[peer_id] = nil
+  peer_names[peer_id] = nil
+  dbg("peer " .. peer_id .. " kicked")
+  return true
+end
+
 function M.stop()
   for _, c in pairs(pending) do
     if not c.handle:is_closing() then

@@ -13,6 +13,7 @@ local presence = require("live-share.presence")
 local follow = require("live-share.follow")
 local session = require("live-share.session")
 local crypto = require("live-share.collab.crypto")
+local audit = require("live-share.audit")
 local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
@@ -188,6 +189,7 @@ end
 local function on_message(msg, from_peer)
   -- ── connect ──────────────────────────────────────────────────────────────
   if msg.t == "connect" then
+    audit.log("peer_connect_request", { peer_id = from_peer })
     -- Step 1: host approves or denies the incoming connection.
     vim.ui.select(
       { "Allow", "Deny" },
@@ -196,6 +198,7 @@ local function on_message(msg, from_peer)
         if choice ~= "Allow" then
           conn:reject(from_peer, { t = "rejected", reason = "Host denied the connection" })
           vim.api.nvim_out_write("live-share: denied guest #" .. from_peer .. "\n")
+          audit.log("peer_denied", { peer_id = from_peer })
           return
         end
 
@@ -208,6 +211,7 @@ local function on_message(msg, from_peer)
             local ro = (role_choice == "Read only")
             conn:approve(from_peer)
             conn:set_role(from_peer, ro and "ro" or "rw")
+            audit.log("peer_approved", { peer_id = from_peer, role = ro and "ro" or "rw" })
 
             conn:send(from_peer, {
               t = "hello",
@@ -260,6 +264,7 @@ local function on_message(msg, from_peer)
     if msg.caps then
       log.dbg("host", "guest " .. from_peer .. " caps: " .. vim.inspect(msg.caps))
     end
+    audit.log("peer_joined", { peer_id = from_peer, peer_name = msg.name })
     vim.schedule(function()
       vim.api.nvim_out_write("live-share: " .. label .. " joined\n")
     end)
@@ -271,15 +276,27 @@ local function on_message(msg, from_peer)
       return
     end
 
-    local lines
-    local t = tracked[path]
-    if t and vim.api.nvim_buf_is_valid(t.buf_id) then
-      lines = vim.api.nvim_buf_get_lines(t.buf_id, 0, -1, false)
-    else
-      lines = workspace.read_file(path)
+    -- Sandbox / sensitive-file enforcement: reject before disk access.
+    local denied_reason = nil
+    if workspace.is_sensitive(path) then
+      denied_reason = "sensitive"
     end
 
-    if not lines then
+    local lines
+    if not denied_reason then
+      local t = tracked[path]
+      if t and vim.api.nvim_buf_is_valid(t.buf_id) then
+        lines = vim.api.nvim_buf_get_lines(t.buf_id, 0, -1, false)
+      else
+        lines = workspace.read_file(path)
+        if not lines then
+          denied_reason = "not-found-or-out-of-sandbox"
+        end
+      end
+    end
+
+    if denied_reason then
+      audit.log("file_request_denied", { peer_id = from_peer, path = path, reason = denied_reason })
       conn:send(from_peer, {
         t = "error",
         code = "file_not_found",
@@ -289,6 +306,7 @@ local function on_message(msg, from_peer)
       return
     end
 
+    audit.log("file_request_allowed", { peer_id = from_peer, path = path })
     conn:send(from_peer, {
       t = "file_response",
       path = path,
@@ -301,6 +319,14 @@ local function on_message(msg, from_peer)
   elseif msg.t == "patch" then
     local path = msg.path
     if not path then
+      return
+    end
+
+    -- Sandbox: silently ignore patches targeting paths outside the workspace
+    -- or against sensitive files (defence-in-depth: server.lua already rejects
+    -- ro guests, but a misbehaving rw guest could still try a stray path).
+    if workspace.is_sensitive(path) then
+      audit.log("patch_rejected_sensitive", { peer_id = from_peer, path = path })
       return
     end
 
@@ -374,6 +400,7 @@ local function on_message(msg, from_peer)
   elseif msg.t == "bye" then
     presence.remove_peer(from_peer)
     conn:broadcast({ t = "bye", peer = from_peer, name = msg.name }, from_peer)
+    audit.log("peer_disconnected", { peer_id = from_peer, peer_name = msg.name })
     vim.schedule(function()
       local label = msg.name or ("guest " .. from_peer)
       vim.api.nvim_out_write("live-share: " .. label .. " left\n")
@@ -397,10 +424,17 @@ end
 function M.start(port)
   local root = (config and config.workspace_root and config.workspace_root ~= "") and config.workspace_root
     or vim.fn.getcwd()
+  workspace.setup(config or {})
   workspace.set_root(root)
   session.id = M.random_sid()
   session.role = "host"
   seq = 0
+  audit.setup(config or {})
+  audit.set_session(session.id)
+  audit.log(
+    "session_start",
+    { workspace = vim.fn.fnamemodify(root, ":t"), transport = (config and config.transport) or "ws" }
+  )
 
   if crypto.available then
     session.key = crypto.generate_key()
@@ -515,6 +549,10 @@ function M.start(port)
   -- Status message.
   p = p or (conn and conn.signaling_port) or "0"
   vim.api.nvim_out_write("live-share: hosting '" .. vim.fn.fnamemodify(root, ":t") .. "' on port " .. p .. "\n")
+  local fp = session.key and crypto.fingerprint(session.key)
+  if fp then
+    vim.api.nvim_out_write("live-share: session fingerprint " .. fp .. " — verify with each guest\n")
+  end
   return true
 end
 
@@ -526,6 +564,8 @@ function M.stop()
     cursor_timer:close()
     cursor_timer = nil
   end
+  audit.log("session_stop")
+  audit.close()
   presence.clear_all()
   follow.reset()
   require("live-share.shared_terminal").stop()
@@ -541,7 +581,43 @@ end
 
 -- Open a shared terminal that guests can see and interact with.
 function M.open_terminal()
+  audit.log("terminal_opened")
   require("live-share.shared_terminal").open_host()
+end
+
+-- ── Mid-session control (host-only) ───────────────────────────────────────────
+
+-- Disconnect a peer immediately.  Sends a "bye" to remaining peers.
+function M.kick(peer_id)
+  if not conn then
+    return false
+  end
+  local name = (presence.get_all() or {})[peer_id] and presence.get_all()[peer_id].name or nil
+  -- presence.get_all returns a list, not a map; fall back by scanning.
+  for _, p in ipairs(presence.get_all() or {}) do
+    if p.peer_id == peer_id then
+      name = p.name
+      break
+    end
+  end
+  if conn.kick then
+    conn:kick(peer_id)
+  end
+  presence.remove_peer(peer_id)
+  conn:broadcast({ t = "bye", peer = peer_id, name = name })
+  audit.log("peer_kicked", { peer_id = peer_id, peer_name = name })
+  return true
+end
+
+-- Change a peer's role mid-session.  Subsequent patches from that peer are
+-- silently dropped server-side if role == "ro".
+function M.set_peer_role(peer_id, role)
+  if not conn or (role ~= "rw" and role ~= "ro") then
+    return false
+  end
+  conn:set_role(peer_id, role)
+  audit.log("role_changed", { peer_id = peer_id, role = role })
+  return true
 end
 
 -- Exposed for tunnel.lua: appends the encryption key to the share URL.

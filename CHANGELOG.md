@@ -8,7 +8,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **Workspace sandbox hardening** — `lua/live-share/workspace.lua` now resolves
+  every requested path through `uv.fs_realpath` and verifies the resolved path
+  is contained inside `realpath(workspace_root)`. Closes a class of path
+  traversal possibilities that the previous substring-based filter could miss
+  (absolute paths like `/etc/passwd`, NUL bytes, segments equal to `..`, and
+  symlinks pointing outside the workspace). For files that don't exist yet, the
+  parent directory is validated instead so `write_file` can't escape via a
+  symlinked subdirectory.
+- **Sensitive-file filter** (default on) — `.env`, `.env.*`, SSH keys
+  (`id_rsa`/`id_ed25519`/`id_ecdsa`/`id_dsa` and their `.pub` counterparts,
+  `known_hosts`, `authorized_keys`), AWS / kube / gcloud / azure credential
+  trees, `*.pem` / `*.key` / `*.p12` / `*.pfx` / `*.jks` / `*.keystore` /
+  `*.asc` / `*.gpg`, and package-manager creds (`.npmrc`, `.pypirc`, `.netrc`,
+  `_netrc`, `htpasswd`) are now excluded from `:LiveShareWorkspace` listings
+  and refused on file requests / patches. Opt out with
+  `setup({ allow_sensitive_files = true })`; extend with
+  `setup({ extra_sensitive_patterns = { "%.tfstate$", "/secrets/" } })`.
+- **Out-of-band session fingerprint** — the host now prints a 6-byte SHA-256
+  prefix of the session key (e.g. `AB-CD-EF-12-34-56`) when the session
+  starts; the guest prints the same fingerprint after connecting. A mismatch
+  means the URL fragment was rewritten in transit. Also visible in
+  `:LiveShareDebugInfo`. Pure UI — no protocol change.
+
 ### Added
+- **Mid-session host control commands** (no protocol change — uses existing
+  primitives):
+  - `:LiveShareKick <peer_id>` — disconnect a peer immediately and broadcast a
+    `bye` to remaining peers.
+  - `:LiveShareReadonly <peer_id>` — demote a connected guest to read-only;
+    subsequent patches from that peer are dropped server-side with the same
+    `unauthorized` error already used for join-time RO assignment.
+  Tab completion on both commands lists currently connected peer ids.
+- **Local audit log** (`lua/live-share/audit.lua`) — append-only JSONL of
+  session events at `stdpath('state')/live-share-audit.log` (configurable via
+  `setup({ audit_log = "/path" })`, disable with `audit_log = false`). One
+  JSON object per line: `ts`, `event`, `sid`, plus event-specific fields
+  (`peer_id`, `peer_name`, `path`, `reason`, `role`). Events recorded:
+  `session_start` / `session_stop`, `peer_connect_request`, `peer_approved` /
+  `peer_denied`, `peer_joined`, `peer_disconnected`, `peer_kicked`,
+  `role_changed`, `file_request_allowed` / `file_request_denied` (with
+  reason: `sensitive` / `not-found-or-out-of-sandbox`),
+  `patch_rejected_sensitive`, `terminal_opened`. File contents and patch
+  payloads are NEVER written to the log.
 - **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
   Neovim ↔ Neovim, Neovim ↔ VS Code via `open-pair`, LAN-only session (custom
   provider), SSH-tunnel session with alternative providers, read-only review
@@ -19,12 +62,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Demo media slots in README** — placeholders (HTML comments) and a
   `docs/media/` directory ready for the hero, cross-editor, shared-terminal, and
   follow-mode GIFs.
+- **`crypto.sha256`** — exposed for the fingerprint helper, with canonical
+  test vectors (empty string and `"abc"`).
+- **New tests:**
+  - `tests/workspace/workspace_spec.lua` — 17 tests covering sandbox traversal,
+    NUL bytes, symlink escape, sensitive-file scan/read/write rules, the
+    `allow_sensitive_files` opt-out, and `extra_sensitive_patterns`.
+  - `tests/audit/audit_spec.lua` — 5 tests covering disabled mode, JSONL
+    append-only writes, `set_session` propagation, and `close()` semantics.
+  - `tests/integration/edge_cases_spec.lua` — 1 new test: `server.kick()`
+    disconnects an approved peer and stops their broadcasts.
+  - `tests/crypto/crypto_spec.lua` — 7 new tests for `sha256` and
+    `fingerprint` (length, format, determinism, distinctness).
 
 ### Changed
 - **README positioning** — overview rewritten to position the project as a GPL-3.0,
   Neovim-native, end-to-end encrypted alternative to VS Code Live Share. Cross-editor
   collaboration with VS Code via [open-pair](https://github.com/darkerthanblack2000/open-pair)
   is now highlighted in the overview rather than buried in a footnote.
+- **`:LiveShareDebugInfo`** now includes the session fingerprint.
+
+### Internals
+- `server.lua` gains `kick(peer_id)` for immediate disconnect of an approved
+  or pending peer.
+- `connection.lua` exposes `:kick(peer_id)` on the listener handle.
+- `host.lua` wires `audit.setup` / `audit.set_session` on `M.start` and
+  `audit.close` on `M.stop`. Adds `M.kick`, `M.set_peer_role`.
+  Defence-in-depth: incoming patches against paths that fail
+  `workspace.is_sensitive` are silently dropped before reaching the broadcast
+  path.
+- New defaults in `init.lua`: `allow_sensitive_files = false`,
+  `extra_sensitive_patterns = nil`, `audit_log = true`.
 
 ---
 

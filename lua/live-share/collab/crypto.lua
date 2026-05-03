@@ -32,6 +32,15 @@ pcall(
   int EVP_CIPHER_CTX_ctrl(EVP_CIPHER_CTX *ctx, int type, int arg, void *ptr);
   const EVP_CIPHER *EVP_aes_256_gcm(void);
   int RAND_bytes(unsigned char *buf, int num);
+
+  typedef struct env_md_ctx_st EVP_MD_CTX;
+  typedef struct evp_md_st     EVP_MD;
+  EVP_MD_CTX *EVP_MD_CTX_new(void);
+  void        EVP_MD_CTX_free(EVP_MD_CTX *ctx);
+  const EVP_MD *EVP_sha256(void);
+  int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, void *impl);
+  int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *d, size_t cnt);
+  int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *s);
 ]]
 )
 
@@ -144,6 +153,47 @@ function M.decrypt(ciphertext_with_tag, key, nonce)
     return nil
   end
   return ffi.string(out, pt_len + outl[0])
+end
+
+-- SHA-256.  Returns a 32-byte binary digest (or nil if OpenSSL is unavailable).
+function M.sha256(input)
+  if not M.available then
+    return nil
+  end
+  local ctx = lib.EVP_MD_CTX_new()
+  if ctx == nil then
+    return nil
+  end
+  lib.EVP_DigestInit_ex(ctx, lib.EVP_sha256(), nil)
+  lib.EVP_DigestUpdate(ctx, input, #input)
+  local out = ffi.new("unsigned char[32]")
+  local outl = ffi.new("unsigned int[1]")
+  lib.EVP_DigestFinal_ex(ctx, out, outl)
+  lib.EVP_MD_CTX_free(ctx)
+  return ffi.string(out, outl[0])
+end
+
+-- Short, human-readable fingerprint of the session key for out-of-band
+-- verification.  Format: "AB-CD-EF-12-34-67" (6 bytes hex, 47 bits of entropy).
+-- Both host and guest derive this independently from the shared key, so a
+-- mismatch means the URL fragment was rewritten in transit.
+function M.fingerprint(key)
+  if not key then
+    return nil
+  end
+  local digest = M.sha256(key)
+  if not digest or #digest < 6 then
+    return nil
+  end
+  return string.format(
+    "%02X-%02X-%02X-%02X-%02X-%02X",
+    digest:byte(1),
+    digest:byte(2),
+    digest:byte(3),
+    digest:byte(4),
+    digest:byte(5),
+    digest:byte(6)
+  )
 end
 
 -- Base64url (RFC 4648 §5, no padding)

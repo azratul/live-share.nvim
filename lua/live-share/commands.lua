@@ -201,6 +201,41 @@ function M.terminal()
   end
 end
 
+-- :LiveShareKick <peer_id>
+function M.kick(peer_id_str)
+  if not session().active() or session().role ~= "host" then
+    vim.notify("live-share: :LiveShareKick is only available for the host", vim.log.levels.WARN)
+    return
+  end
+  local peer_id = tonumber(peer_id_str)
+  if not peer_id then
+    vim.notify("live-share: usage: :LiveShareKick <peer_id>", vim.log.levels.WARN)
+    return
+  end
+  if host().kick(peer_id) then
+    vim.api.nvim_out_write("live-share: kicked peer " .. peer_id .. "\n")
+  else
+    vim.notify("live-share: peer " .. peer_id .. " not found", vim.log.levels.WARN)
+  end
+end
+
+-- :LiveShareReadonly <peer_id>
+-- Demote a connected guest to read-only mid-session.
+function M.set_readonly(peer_id_str)
+  if not session().active() or session().role ~= "host" then
+    vim.notify("live-share: :LiveShareReadonly is only available for the host", vim.log.levels.WARN)
+    return
+  end
+  local peer_id = tonumber(peer_id_str)
+  if not peer_id then
+    vim.notify("live-share: usage: :LiveShareReadonly <peer_id>", vim.log.levels.WARN)
+    return
+  end
+  if host().set_peer_role(peer_id, "ro") then
+    vim.api.nvim_out_write("live-share: peer " .. peer_id .. " is now read-only\n")
+  end
+end
+
 -- :LiveShareDebugInfo
 function M.debug_info()
   local lines = { "# live-share.nvim debug info", "" }
@@ -254,6 +289,12 @@ function M.debug_info()
       local ok_t, tunnel = pcall(require, "live-share.tunnel")
       local share_url = ok_t and tunnel.last_url
       lines[#lines + 1] = "share url       : " .. (share_url or "(tunnel not ready yet)")
+    end
+    if session.key then
+      local fp = crypto.fingerprint(session.key)
+      if fp then
+        lines[#lines + 1] = "fingerprint     : " .. fp
+      end
     end
   else
     lines[#lines + 1] = "session         : none"

@@ -75,6 +75,10 @@ function M.new_listener(opts)
     server.set_name(peer_id, name)
   end
 
+  function self:kick(peer_id)
+    return server.kick(peer_id)
+  end
+
   function self:stop()
     server.stop()
   end

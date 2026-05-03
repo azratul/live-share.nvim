@@ -107,11 +107,15 @@ describe("protocol", function()
     local function load_fixture(name)
       local path = fixtures_dir .. "/" .. name
       local f = io.open(path, "r")
-      if not f then return nil, "cannot open " .. path end
+      if not f then
+        return nil, "cannot open " .. path
+      end
       local content = f:read("*a")
       f:close()
       local ok, data = pcall(vim.json.decode, content)
-      if not ok then return nil, "invalid JSON in " .. path end
+      if not ok then
+        return nil, "invalid JSON in " .. path
+      end
       return data
     end
 
@@ -166,7 +170,8 @@ describe("protocol", function()
     end)
 
     it("each fixture round-trips through encode/decode (plaintext)", function()
-      local fixtures = { "handshake.json", "patch.json", "cursor.json", "terminal_data.json", "bye.json", "hello_ack.json" }
+      local fixtures =
+        { "handshake.json", "patch.json", "cursor.json", "terminal_data.json", "bye.json", "hello_ack.json" }
       for _, name in ipairs(fixtures) do
         local msg, err = load_fixture(name)
         assert.is_nil(err, err)

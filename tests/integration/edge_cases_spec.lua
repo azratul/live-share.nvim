@@ -164,9 +164,12 @@ describe("Abrupt disconnect", function()
       "timed out — witness peer never received the synthesized bye broadcast"
     )
 
-    assert.equals("bob", find_msg(p2.msgs, function(m)
-      return m.t == "bye"
-    end).name)
+    assert.equals(
+      "bob",
+      find_msg(p2.msgs, function(m)
+        return m.t == "bye"
+      end).name
+    )
 
     p2:stop()
   end)
@@ -258,6 +261,71 @@ describe("Connection rejection", function()
   end)
 end)
 
+-- ── Kick ──────────────────────────────────────────────────────────────────────
+describe("server.kick()", function()
+  after_each(function()
+    server.stop()
+  end)
+
+  it("disconnects an approved peer and they stop receiving broadcasts", function()
+    local peer_ids = {}
+
+    server.setup(function(msg, peer_id)
+      if msg.t == "connect" then
+        table.insert(peer_ids, peer_id)
+        server.approve(peer_id)
+      end
+    end)
+    assert.is_true(server.start("127.0.0.1", BASE_PORT + 5, nil), "server failed to bind")
+
+    local p1 = make_tcp_peer(BASE_PORT + 5, nil)
+    local p2 = make_tcp_peer(BASE_PORT + 5, nil)
+
+    assert.is_true(
+      wait_for(function()
+        return #peer_ids == 2
+      end),
+      "timed out waiting for both peers"
+    )
+
+    -- Send a baseline broadcast both peers should receive.
+    server.broadcast({ t = "patch", path = "x.lua", lnum = 0, count = 0, lines = { "before-kick" } })
+
+    assert.is_true(
+      wait_for(function()
+        return find_msg(p1.msgs, function(m)
+          return m.t == "patch" and m.lines[1] == "before-kick"
+        end) ~= nil
+      end),
+      "p1 never received baseline patch"
+    )
+
+    -- Kick p1, then broadcast again.
+    assert.is_true(server.kick(peer_ids[1]))
+    -- A small delay to let close propagate before the next broadcast.
+    vim.wait(50)
+    server.broadcast({ t = "patch", path = "x.lua", lnum = 1, count = 0, lines = { "after-kick" } })
+
+    assert.is_true(
+      wait_for(function()
+        return find_msg(p2.msgs, function(m)
+          return m.t == "patch" and m.lines[1] == "after-kick"
+        end) ~= nil
+      end),
+      "p2 never received post-kick patch"
+    )
+    assert.is_nil(
+      find_msg(p1.msgs, function(m)
+        return m.t == "patch" and m.lines[1] == "after-kick"
+      end),
+      "kicked peer must not receive subsequent broadcasts"
+    )
+
+    p1:stop()
+    p2:stop()
+  end)
+end)
+
 -- ── Broadcast except_peer ─────────────────────────────────────────────────────
 describe("Broadcast except_peer exclusion", function()
   after_each(function()
@@ -274,10 +342,7 @@ describe("Broadcast except_peer exclusion", function()
         table.insert(peer_ids, peer_id)
         server.approve(peer_id)
         if connected == 2 then
-          server.broadcast(
-            { t = "patch", path = "x.lua", lnum = 0, count = 0, lines = { "exclusive" } },
-            peer_ids[1]
-          )
+          server.broadcast({ t = "patch", path = "x.lua", lnum = 0, count = 0, lines = { "exclusive" } }, peer_ids[1])
         end
       end
     end)

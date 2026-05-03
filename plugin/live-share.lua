@@ -106,6 +106,40 @@ end, {
   desc = "Open a scratch buffer with debug info for bug reports",
 })
 
+-- Tab-completion: list connected peer ids (used by Kick / Readonly / Follow).
+local function complete_peer_ids(arg_lead)
+  local ok, presence = pcall(require, "live-share.presence")
+  if not ok then
+    return {}
+  end
+  local result = {}
+  for _, p in ipairs(presence.get_all()) do
+    local s = tostring(p.peer_id)
+    if arg_lead == "" or s:find(arg_lead, 1, true) then
+      result[#result + 1] = s
+    end
+  end
+  return result
+end
+
+-- :LiveShareKick <peer_id>
+cmd("LiveShareKick", function(opts)
+  require("live-share.commands").kick(opts.args)
+end, {
+  nargs = 1,
+  desc = "Disconnect a guest immediately (host only)",
+  complete = complete_peer_ids,
+})
+
+-- :LiveShareReadonly <peer_id>
+cmd("LiveShareReadonly", function(opts)
+  require("live-share.commands").set_readonly(opts.args)
+end, {
+  nargs = 1,
+  desc = "Demote a connected guest to read-only (host only)",
+  complete = complete_peer_ids,
+})
+
 -- :LiveShareServer is a deprecated alias for :LiveShareHostStart (renamed in v2.0.0)
 cmd("LiveShareServer", function(opts)
   vim.notify("live-share: :LiveShareServer is deprecated, use :LiveShareHostStart", vim.log.levels.WARN)
