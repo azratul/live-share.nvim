@@ -6,7 +6,9 @@ local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
 local DEFAULT_MAX_DEPTH = 8
-local DEFAULT_MAX_FILES = 10000
+-- 0 (or any non-positive number) disables the cap.  Default raised so monorepos
+-- aren't silently truncated; the previous 10 000 cap was hit in practice.
+local DEFAULT_MAX_FILES = 50000
 local FILE_SIZE_CAP = 5 * 1024 * 1024 -- 5 MB
 local GIT_LS_TIMEOUT_MS = 5000
 
@@ -352,12 +354,13 @@ local function scan_via_git(dir)
   if not out then
     return nil
   end
+  local capped = max_files and max_files > 0
   local paths = {}
   local truncated = false
   for path in out:gmatch("([^%z]+)") do
     if not is_sensitive(path) then
       paths[#paths + 1] = path
-      if #paths >= max_files then
+      if capped and #paths >= max_files then
         truncated = true
         break
       end
@@ -369,6 +372,7 @@ local function scan_via_git(dir)
 end
 
 local function scan_via_walk(dir_root)
+  local capped = max_files and max_files > 0
   local paths = {}
   local truncated = false
 
@@ -392,7 +396,7 @@ local function scan_via_walk(dir_root)
           if entry.type == "file" then
             if not is_sensitive(rel) then
               paths[#paths + 1] = rel
-              if #paths >= max_files then
+              if capped and #paths >= max_files then
                 truncated = true
                 break
               end

@@ -226,6 +226,17 @@ local function on_message(msg, from_peer)
 
             -- Workspace file list (flat).
             local files = workspace.scan()
+            if workspace.scan_was_truncated() then
+              local n = #files
+              vim.schedule(function()
+                vim.notify(
+                  "live-share: workspace listing truncated at "
+                    .. n
+                    .. " files. Raise `scan_max_files` (or set it to 0 to disable the cap) in setup() to send the full tree.",
+                  vim.log.levels.WARN
+                )
+              end)
+            end
             conn:send(from_peer, {
               t = "workspace_info",
               root_name = vim.fn.fnamemodify(workspace.get_root() or ".", ":t"),
@@ -273,7 +284,7 @@ local function on_message(msg, from_peer)
     end
     audit.log("peer_joined", { peer_id = from_peer, peer_name = msg.name })
     vim.schedule(function()
-      vim.api.nvim_out_write("live-share: " .. label .. " joined\n")
+      vim.api.nvim_out_write("live-share: " .. label .. " joined as peer #" .. from_peer .. "\n")
     end)
 
   -- ── file_request ──────────────────────────────────────────────────────────
@@ -625,6 +636,15 @@ function M.set_peer_role(peer_id, role)
   conn:set_role(peer_id, role)
   audit.log("role_changed", { peer_id = peer_id, role = role })
   return true
+end
+
+-- Returns the host-side role ("rw" / "ro") of a connected peer, or nil if the
+-- peer is unknown.  Used by the UI to label peers in :LiveSharePeers.
+function M.get_peer_role(peer_id)
+  if not conn or not conn.get_role then
+    return nil
+  end
+  return conn:get_role(peer_id)
 end
 
 -- Exposed for tunnel.lua: appends the encryption key to the share URL.

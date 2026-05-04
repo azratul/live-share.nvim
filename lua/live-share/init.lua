@@ -47,11 +47,14 @@ local defaults = {
   -- git isn't available or fails.
   scan_use_gitignore = true,
   -- Hard cap on the number of files included in `workspace_info`.  Protects
-  -- the editor from monorepos with hundreds of thousands of files.
-  scan_max_files = 10000,
+  -- the editor from monorepos with hundreds of thousands of files.  Set to 0
+  -- (or any non-positive number) to disable the cap entirely.  When the cap
+  -- is hit, the host gets a one-time `vim.notify` warning so the truncation
+  -- isn't silent.
+  scan_max_files = 50000,
   -- Maximum directory recursion depth for the manual walker (git mode is not
   -- depth-limited — git already excludes ignored subtrees).
-  scan_max_depth = 8,
+  scan_max_depth = 20,
   -- Extra directory basenames to skip during the manual walk.  Stacked on top
   -- of the built-in list (.git, node_modules, target, .venv, dist, build, …).
   -- Example: { "fixtures", "snapshots" }

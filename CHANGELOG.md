@@ -71,9 +71,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   default ignore set (`target`, `.venv`, `.next`, `.turbo`, `.gradle`,
   `.terraform`, `coverage`, `bin`, `obj`, …) and a hard cap on the number of
   files included. New options: `scan_use_gitignore` (default `true`),
-  `scan_max_files` (default 10000), `scan_max_depth` (default 8),
-  `scan_extra_ignore` (extra dir basenames). The `workspace_info` message
-  shape is unchanged — fully backwards-compatible with `open-pair`.
+  `scan_max_files` (default 50000; set to 0 to disable the cap entirely),
+  `scan_max_depth` (default 8), `scan_extra_ignore` (extra dir basenames).
+  The `workspace_info` message shape is unchanged — fully
+  backwards-compatible with `open-pair`.
+- **`:LiveSharePeers` now shows peer IDs and roles** — every entry is prefixed
+  with `#<id>` and tagged `[rw]` / `[ro]`, so the host knows which id to pass
+  to `:LiveShareKick` / `:LiveShareReadonly`. Host gets a one-line hint at the
+  bottom listing both commands. The host's own line is shown as `host (#0)`.
+  The peer-joined notification on the host now reads
+  `"<name> joined as peer #<id>"`.
 - **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
   Neovim ↔ Neovim, Neovim ↔ VS Code via `open-pair`, LAN-only session (custom
   provider), SSH-tunnel session with alternative providers, read-only review
@@ -106,6 +113,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   collaboration with VS Code via [open-pair](https://github.com/darkerthanblack2000/open-pair)
   is now highlighted in the overview rather than buried in a footnote.
 - **`:LiveShareDebugInfo`** now includes the session fingerprint.
+- **Workspace scan default cap raised** from 10 000 to 50 000 files; when the
+  cap is hit the host now gets a `vim.notify` warning telling them how many
+  files were sent and how to raise/disable the cap. Set `scan_max_files = 0`
+  to send the full tree (the prior unbounded behaviour).
 
 ### Internals
 - `server.lua` gains `kick(peer_id)` for immediate disconnect of an approved

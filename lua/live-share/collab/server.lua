@@ -230,6 +230,10 @@ function M.set_role(peer_id, role)
   dbg("peer " .. peer_id .. " role = " .. tostring(role))
 end
 
+function M.get_role(peer_id)
+  return peer_roles[peer_id]
+end
+
 function M.set_name(peer_id, name)
   peer_names[peer_id] = name
   dbg("peer " .. peer_id .. " name = " .. tostring(name))

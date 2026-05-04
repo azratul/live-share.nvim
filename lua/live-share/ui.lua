@@ -169,9 +169,35 @@ function M.show_peers()
   end
 
   local peers = presence.get_all()
+  table.sort(peers, function(a, b)
+    return (a.peer_id or 0) < (b.peer_id or 0)
+  end)
+
+  local is_host = session.role == "host"
+  local host = is_host and require("live-share.host") or nil
+
+  local function peer_role_tag(p)
+    -- Host has the authoritative role table; guests fall back to the per-buffer
+    -- readonly flag set by the open-files snapshot.
+    if is_host and host and host.get_peer_role then
+      local r = host.get_peer_role(p.peer_id)
+      if r == "ro" then
+        return " [ro]"
+      elseif r == "rw" then
+        return " [rw]"
+      end
+    elseif p.active_path then
+      local b = require("live-share.buffer_registry").get_buf(p.active_path)
+      if b and vim.b[b] and vim.b[b].live_share_readonly then
+        return " [ro]"
+      end
+    end
+    return ""
+  end
+
   local g_role = require("live-share.guest").get_role and require("live-share.guest").get_role() or nil
   local role_suffix = (g_role == "ro") and " [read-only]" or ""
-  local role = session.role == "host" and "host" or ("guest #" .. tostring(session.peer_id) .. role_suffix)
+  local role = is_host and "host (#0)" or ("guest #" .. tostring(session.peer_id) .. role_suffix)
 
   local lines = {
     "  Live Share — Peers",
@@ -186,18 +212,15 @@ function M.show_peers()
     for _, p in ipairs(peers) do
       local loc = p.active_path or "(unknown file)"
       local pos = p.lnum and ("  L" .. (p.lnum + 1)) or ""
-      local ro = ""
-      if p.active_path then
-        local b = require("live-share.buffer_registry").get_buf(p.active_path)
-        if b and vim.b[b] and vim.b[b].live_share_readonly then
-          ro = " [ro]"
-        end
-      end
-      lines[#lines + 1] = "  • " .. p.name .. "  →  " .. loc .. pos .. ro
+      local id = p.peer_id and ("#" .. p.peer_id .. " ") or ""
+      lines[#lines + 1] = "  • " .. id .. p.name .. peer_role_tag(p) .. "  →  " .. loc .. pos
     end
   end
 
   lines[#lines + 1] = ""
+  if is_host then
+    lines[#lines + 1] = "  Host: :LiveShareKick <id> · :LiveShareReadonly <id>"
+  end
   lines[#lines + 1] = "  [q / <Esc> to close]"
 
   local w = 0
