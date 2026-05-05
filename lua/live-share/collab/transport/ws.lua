@@ -36,7 +36,9 @@ function M.frame_client(payload)
   return ws.encode_frame(payload, true)
 end
 
-M.new_reader = ws.new_frame_reader
+function M.new_reader(max_bytes)
+  return ws.new_frame_reader(max_bytes)
+end
 
 -- ── Server-side handshake ─────────────────────────────────────────────────────
 

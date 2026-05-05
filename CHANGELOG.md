@@ -8,7 +8,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Protocol
+- **`protocol_version` bumped from 3 to 4 (stage 2 of the v4 migration).**
+  v4 is staged on `develop` and will only ship to Nightly once stages 3–6
+  also land. Plain v3 clients can no longer interop: the guest's
+  version-mismatch handler now sends `bye` and disconnects instead of
+  emitting a warning. Each subsequent stage will extend v4 in place
+  (no further bumps); the open-pair (VS Code) port is deferred until all
+  stages land and `develop` is merged to Nightly.
+
 ### Security
+- **Lifecycle hardening (stage 2 of v4 migration; introduces the v3→v4 bump)**
+  — three host-side ceilings closed in one pass:
+  - **Max frame size** — both `transport/tcp.lua` (length-prefix) and
+    `websocket.lua` (binary frames) now enforce a 10 MB ceiling on the
+    declared payload length.  Oversized frames are dropped before any
+    allocation and the connection is closed.  Caller chooses the limit by
+    passing it to `new_reader(max_bytes)`; `server.lua` and `client.lua`
+    pass `MAX_MESSAGE_BYTES = 10 * 1024 * 1024`.
+  - **Pending-peer timeout (90 s)** — a peer that connects but never
+    receives `hello` (host has not approved or rejected) is force-closed
+    by `server.lua` after the deadline.  Fixes a leak where a guest
+    parking on the approval prompt could camp the slot indefinitely.
+  - **Heartbeat ping/pong (15 s ping / 30 s idle kill)** — host sends
+    `{t="ping", ts=...}` to every approved peer every 15 s; any peer with
+    no inbound frame for 30 s is closed.  Guest auto-replies with `pong`
+    inside `client.lua` (never bubbles to the application handler) and
+    runs its own 30 s idle watchdog so a dead host disconnects the guest
+    cleanly instead of hanging.
+  - **Strict version check** — `guest.lua` now hard-disconnects on a
+    `protocol_version` mismatch with a clear error message; previously
+    only warned.
+  Tests: `tests/integration/stage2_spec.lua` (oversized-frame rejection
+  on both transports, heartbeat round-trip, idle disconnect, pending-peer
+  timeout cancellation on approve).
+
 - **Server-side defence-in-depth (stage 1 of v4 migration; no protocol bump)**
   — three host-side validations applied before any guest message reaches a
   handler:

@@ -1,4 +1,4 @@
-# Live-Share.nvim Protocol Specification (v1.2.0)
+# Live-Share.nvim Protocol Specification (v1.3.0-pre)
 
 This document describes the communication protocol used by `live-share.nvim`. It is designed to allow developers to implement compatible plugins for other editors.
 
@@ -201,13 +201,16 @@ Resolution flow for concurrent edits to the same line:
 
 > **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.2.0` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
 
-The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **3**.
+The `hello` message carries a `protocol_version` integer field. From v4 onward clients **must** disconnect on a version mismatch (earlier versions only required a warning). The current version is **4**.
+
+> **v4 status:** v4 is being staged on the `develop` branch and will only ship to Nightly once all migration steps land. Implementations targeting the released `main` branch should still treat v3 as the stable wire format. The full migration plan and per-stage notes live in `CHANGELOG.md` under the `[Unreleased]` section.
 
 | Version | Change summary |
 | :--- | :--- |
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 | 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
+| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill). Future Stage 3–6 changes (AEAD AAD, X25519 forward secrecy, audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
 
 ---
 
@@ -236,7 +239,7 @@ Every message is a JSON object with a type field `t`.
 ```json
 {
   "t": "hello",
-  "protocol_version": 3,
+  "protocol_version": 4,
   "peer_id": 1,
   "sid": "a1b2c3d4",
   "role": "rw",
@@ -409,7 +412,25 @@ Defined error codes:
 
 Clients **must** display the `message` field to the user and **should not** treat unknown codes as fatal.
 
-### 5.5 Shared Terminal
+### 5.5 Heartbeat (v4+)
+
+Both ends keep the transport warm with an application-level ping/pong exchange. The host pings every approved peer every 15 s and closes the connection if no inbound traffic arrives for 30 s. Guests respond to every `ping` with a matching `pong` echoing the host's `ts`. Either side **may** send a `ping` at any time; the receiver **must** answer with a `pong`. Any received frame counts as keepalive evidence regardless of `t`, so a busy session never trips the idle threshold.
+
+Heartbeat traffic is invisible above the transport layer — implementors should handle `ping`/`pong` inside the framing/transport module and not surface them to the application.
+
+#### `ping` (Host → Guest, optional Guest → Host)
+```json
+{ "t": "ping", "ts": 173400000 }
+```
+`ts` is an arbitrary monotonic timestamp (milliseconds). It has no semantic meaning for the receiver beyond echoing it back.
+
+#### `pong` (Guest → Host, optional Host → Guest)
+```json
+{ "t": "pong", "ts": 173400000 }
+```
+The `ts` field **must** be the same value received in the corresponding `ping`.
+
+### 5.6 Shared Terminal
 
 #### `terminal_open` (Host → Guest)
 Notifies guests that a shared terminal session has started.
@@ -493,6 +514,19 @@ No collaborative traffic should be exchanged.
 
 **Unknown cap token:** Clients encountering an unrecognised token in `required_caps` must treat it as unsupported (disconnect). An unrecognised token in `optional_caps` or in `hello_ack.caps` must be silently ignored — forward compatibility requires ignoring unknown optional tokens.
 
+### 7.5 Lifecycle Limits (v4+)
+
+The following ceilings are enforced at the transport layer. Frames violating them are dropped before any allocation, and the connection is closed.
+
+| Limit | Value | Behaviour on violation |
+| :--- | :--- | :--- |
+| Max bytes per frame | 10 × 1024 × 1024 (10 MB) | Connection closed immediately. No `error` is sent — by the time the limit fires the framer cannot trust the stream. |
+| Pending-peer timeout | 90 s | A peer that connects but never receives `hello` (host has not approved or rejected) is force-closed. |
+| Ping interval | 15 s | Sent automatically by the host to every approved peer. |
+| Idle-kill threshold | 30 s | A peer with no inbound frames for this long is closed (≈ two missed pings). |
+
+Clients **must not** assume any specific ceiling; the values above are the host-side defaults. New connections that disconnect immediately and consistently should be debugged by checking message size first.
+
 ---
 
 ## 8. Client State Transitions
@@ -567,7 +601,7 @@ The host prompts the user ("Bob wants to join — approve?") and on approval sen
 ```json
 {
   "t": "hello",
-  "protocol_version": 3,
+  "protocol_version": 4,
   "peer_id": 1,
   "sid": "f4a9b2c1",
   "role": "rw",

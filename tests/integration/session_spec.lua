@@ -157,7 +157,7 @@ describe("WebSocket mode integration", function()
     server.setup(function(msg, peer_id)
       if msg.t == "connect" then
         server.approve(peer_id)
-        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "ws-sid", protocol_version = 3 })
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "ws-sid", protocol_version = 4 })
       end
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 1, nil), "server failed to bind")
@@ -197,7 +197,7 @@ describe("Encrypted mode integration", function()
     server.setup(function(msg, peer_id)
       if msg.t == "connect" then
         server.approve(peer_id)
-        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-sid", protocol_version = 3 })
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-sid", protocol_version = 4 })
       end
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 2, key), "server failed to bind")
@@ -224,7 +224,7 @@ describe("Encrypted mode integration", function()
     server.setup(function(msg, peer_id)
       if msg.t == "connect" then
         server.approve(peer_id)
-        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-ws-sid", protocol_version = 3 })
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "enc-ws-sid", protocol_version = 4 })
       end
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 3, key), "server failed to bind")

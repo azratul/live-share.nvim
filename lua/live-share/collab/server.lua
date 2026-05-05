@@ -22,14 +22,36 @@ local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
 local srv = nil
-local pending = {} -- peer_id -> { handle, framer, mode }  (awaiting host approval)
+local pending = {} -- peer_id -> { handle, framer, mode, pending_timer }  (awaiting host approval)
 local clients = {} -- peer_id -> { handle, framer, mode }  (approved peers)
 local peer_roles = {} -- peer_id -> "rw" | "ro"
 local peer_names = {} -- peer_id -> name (for synthesising bye on abrupt disconnect)
 local rate_buckets = {} -- peer_id -> { [kind] = { tokens, last_ms } }  (token-bucket rate limit)
+local last_seen = {} -- peer_id -> ms timestamp of last byte received from peer
+local heartbeat_timer = nil
 local next_peer = 1
 local on_message = nil
 local session_key = nil
+
+-- Maximum bytes per protocol frame.  Frames declaring a length above this are
+-- dropped at the transport reader before any allocation, and the connection
+-- is closed.  Defends against a malicious peer announcing huge sizes to
+-- exhaust host memory.  Picked to comfortably cover today's largest
+-- legitimate message (`workspace_info` for a ~50k-file monorepo, ~5 MB JSON)
+-- while remaining well below the 4 GB WS frame ceiling.
+local MAX_MESSAGE_BYTES = 10 * 1024 * 1024
+
+-- Pending-peer timeout: an unapproved peer sitting in `pending` past this
+-- deadline is force-closed.  Avoids leaks from clients that connect, sit on
+-- the prompt, and never finish (or are deliberately camping the slot).
+local PENDING_TIMEOUT_MS = 90 * 1000
+
+-- Heartbeat: server sends a ping to every approved peer every PING_INTERVAL_MS
+-- and disconnects any peer with no inbound traffic for IDLE_KILL_MS.  The
+-- 30 s deadline is ~2× the ping interval so a single dropped pong does not
+-- kill an otherwise-healthy peer; two consecutive misses do.
+local PING_INTERVAL_MS = 15 * 1000
+local IDLE_KILL_MS = 30 * 1000
 
 -- Per-peer rate limits.  Defends against a malicious or buggy guest spamming
 -- patches/cursors and saturating the host's main loop.  Numbers are generous
@@ -78,8 +100,52 @@ local function dbg(msg)
   log.dbg("server", msg)
 end
 
+-- Forward declaration (used inside heartbeat timer below).
+local close_peer
+
 function M.setup(cb)
   on_message = cb
+end
+
+-- Heartbeat: walks the approved client table once per PING_INTERVAL_MS and
+-- (a) sends a {t="ping"} to every healthy peer; (b) closes any peer that has
+-- gone silent for longer than IDLE_KILL_MS.  Clients respond with {t="pong"};
+-- the act of receiving any frame counts as keepalive evidence regardless of
+-- the message type, so even a chatty session never trips the idle threshold.
+local function start_heartbeat()
+  if heartbeat_timer then
+    return
+  end
+  heartbeat_timer = uv.new_timer()
+  heartbeat_timer:start(
+    PING_INTERVAL_MS,
+    PING_INTERVAL_MS,
+    vim.schedule_wrap(function()
+      local now = uv.now()
+      for pid, c in pairs(clients) do
+        local seen = last_seen[pid] or now
+        if now - seen > IDLE_KILL_MS then
+          dbg("peer " .. pid .. " idle for " .. (now - seen) .. " ms — closing")
+          close_peer(pid, "idle timeout")
+        elseif not c.handle:is_closing() then
+          local ok, frame = pcall(function()
+            return c.framer(protocol.encode({ t = "ping", ts = now }, session_key))
+          end)
+          if ok and frame then
+            c.handle:write(frame)
+          end
+        end
+      end
+    end)
+  )
+end
+
+local function stop_heartbeat()
+  if heartbeat_timer then
+    heartbeat_timer:stop()
+    heartbeat_timer:close()
+    heartbeat_timer = nil
+  end
 end
 
 function M.start(ip, port, key)
@@ -121,6 +187,14 @@ function M.start(ip, port, key)
       if not clients[peer_id] then
         return
       end
+      -- ping / pong are handled at this layer and never bubble up to the
+      -- application: pong (and any incoming ping from the guest) only
+      -- serves to bump last_seen, which already happened in the read
+      -- callback.  Returning here keeps the upper layer's message handler
+      -- focused on application-level events.
+      if msg.t == "pong" or msg.t == "ping" then
+        return
+      end
       -- Enforce read-only: reject patch messages from ro peers.
       if msg.t == "patch" and peer_roles[peer_id] == "ro" then
         dbg("peer " .. peer_id .. " is read-only — rejecting patch")
@@ -154,10 +228,16 @@ function M.start(ip, port, key)
     local function on_disconnect(reason)
       vim.schedule(function()
         dbg("peer " .. peer_id .. " disconnected: " .. tostring(reason))
+        local p = pending[peer_id]
+        if p and p.pending_timer then
+          p.pending_timer:stop()
+          p.pending_timer:close()
+        end
         pending[peer_id] = nil
         clients[peer_id] = nil
         peer_roles[peer_id] = nil
         rate_buckets[peer_id] = nil
+        last_seen[peer_id] = nil
         local name = peer_names[peer_id]
         peer_names[peer_id] = nil
         if on_message then
@@ -170,13 +250,44 @@ function M.start(ip, port, key)
     end
 
     local function process(data)
-      local payloads = reader(data)
+      local payloads, rerr = reader(data)
+      if not payloads then
+        dbg("peer " .. peer_id .. " transport error: " .. tostring(rerr) .. " — closing")
+        on_disconnect(rerr)
+        return
+      end
+      -- Mark the peer alive on every parsed frame, regardless of message type.
+      -- This is what lets the heartbeat consider any chatter (patches, cursor
+      -- moves, pongs) as keepalive evidence.
+      if #payloads > 0 then
+        last_seen[peer_id] = uv.now()
+      end
       for _, payload in ipairs(payloads) do
         local msg = protocol.decode(payload, session_key)
         if msg then
           dispatch(msg)
         end
       end
+    end
+
+    -- Arms the pending-peer timeout.  Called once we know the transport mode.
+    local function arm_pending_timeout()
+      local p = pending[peer_id]
+      if not p then
+        return
+      end
+      local t = uv.new_timer()
+      p.pending_timer = t
+      t:start(
+        PENDING_TIMEOUT_MS,
+        0,
+        vim.schedule_wrap(function()
+          if pending[peer_id] then
+            dbg("peer " .. peer_id .. " unapproved after " .. PENDING_TIMEOUT_MS .. " ms — kicking")
+            close_peer(peer_id, "pending timeout")
+          end
+        end)
+      )
     end
 
     local function complete_ws_handshake(initial_buf)
@@ -196,6 +307,7 @@ function M.start(ip, port, key)
       conn:write(response)
       state = "ws"
       pending[peer_id] = { handle = conn, framer = ws_framer, mode = "ws" }
+      arm_pending_timeout()
       dbg("peer " .. peer_id .. " WS handshake done — awaiting host approval")
       vim.schedule(function()
         if on_message then
@@ -222,13 +334,14 @@ function M.start(ip, port, key)
         end
         if buf:sub(1, 4) == "GET " then
           state = "ws_hs"
-          reader = ws_trans.new_reader()
+          reader = ws_trans.new_reader(MAX_MESSAGE_BYTES)
           dbg("peer " .. peer_id .. " → WebSocket mode")
           -- fall through to ws_hs handling below
         else
           state = "tcp"
-          reader = tcp_trans.new_reader()
+          reader = tcp_trans.new_reader(MAX_MESSAGE_BYTES)
           pending[peer_id] = { handle = conn, framer = tcp_framer, mode = "tcp" }
+          arm_pending_timeout()
           dbg("peer " .. peer_id .. " → raw TCP mode — awaiting host approval")
           vim.schedule(function()
             if on_message then
@@ -269,8 +382,15 @@ function M.approve(peer_id)
     dbg("approve: peer " .. peer_id .. " not in pending")
     return
   end
+  if p.pending_timer then
+    p.pending_timer:stop()
+    p.pending_timer:close()
+    p.pending_timer = nil
+  end
   pending[peer_id] = nil
   clients[peer_id] = p
+  last_seen[peer_id] = uv.now()
+  start_heartbeat()
   dbg("peer " .. peer_id .. " approved")
 end
 
@@ -291,8 +411,17 @@ end
 function M.reject(peer_id, msg)
   local p = pending[peer_id]
   if not p or p.handle:is_closing() then
+    if p and p.pending_timer then
+      p.pending_timer:stop()
+      p.pending_timer:close()
+    end
     pending[peer_id] = nil
     return
+  end
+  if p.pending_timer then
+    p.pending_timer:stop()
+    p.pending_timer:close()
+    p.pending_timer = nil
   end
   local ok, frame = pcall(function()
     return p.framer(protocol.encode(msg, session_key))
@@ -356,10 +485,35 @@ function M.broadcast(msg, except_peer)
   end
 end
 
+-- Internal: synchronous variant used by heartbeat / pending timeout, where
+-- we want to close the socket and let the on_disconnect callback do the
+-- registry cleanup naturally.  Differs from M.kick in that it does NOT
+-- aggressively wipe state — letting on_disconnect run keeps the regular
+-- "peer left" flow (presence cleanup, bye broadcast) intact.
+close_peer = function(peer_id, _reason)
+  local c = clients[peer_id] or pending[peer_id]
+  if not c then
+    return
+  end
+  if c.pending_timer then
+    c.pending_timer:stop()
+    c.pending_timer:close()
+    c.pending_timer = nil
+  end
+  if not c.handle:is_closing() then
+    c.handle:close()
+  end
+end
+
 function M.kick(peer_id)
   local c = clients[peer_id] or pending[peer_id]
   if not c then
     return false
+  end
+  if c.pending_timer then
+    c.pending_timer:stop()
+    c.pending_timer:close()
+    c.pending_timer = nil
   end
   if not c.handle:is_closing() then
     c.handle:close()
@@ -369,12 +523,18 @@ function M.kick(peer_id)
   peer_roles[peer_id] = nil
   peer_names[peer_id] = nil
   rate_buckets[peer_id] = nil
+  last_seen[peer_id] = nil
   dbg("peer " .. peer_id .. " kicked")
   return true
 end
 
 function M.stop()
+  stop_heartbeat()
   for _, c in pairs(pending) do
+    if c.pending_timer then
+      c.pending_timer:stop()
+      c.pending_timer:close()
+    end
     if not c.handle:is_closing() then
       c.handle:close()
     end
@@ -389,6 +549,7 @@ function M.stop()
   peer_roles = {}
   peer_names = {}
   rate_buckets = {}
+  last_seen = {}
   next_peer = 1
   session_key = nil
   if srv and not srv:is_closing() then

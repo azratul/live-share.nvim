@@ -53,7 +53,7 @@ describe("TCP mode integration", function()
       if msg.t == "connect" then
         server_received = peer_id
         server.approve(peer_id)
-        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "test-sid", protocol_version = 3 })
+        server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "test-sid", protocol_version = 4 })
       end
     end)
     assert.is_true(server.start("127.0.0.1", PORT + 1, nil), "server failed to bind")

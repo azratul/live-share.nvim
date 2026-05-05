@@ -20,6 +20,18 @@ local conn = nil
 local on_message = nil
 local session_key = nil
 local send_frame = nil -- fn(payload) → framed bytes; set at connect time
+local last_seen_ms = nil
+local idle_timer = nil
+
+-- Must match the server-side ceiling defined in server.lua.  Frames declared
+-- larger than this are dropped at the transport reader and treated as fatal.
+local MAX_MESSAGE_BYTES = 10 * 1024 * 1024
+
+-- Idle timer: closes the connection if no inbound traffic arrives for
+-- IDLE_KILL_MS.  The host's heartbeat sends a ping every 15 s; missing two
+-- consecutive pings (≥ 30 s of silence) signals a dead transport.
+local IDLE_CHECK_MS = 5 * 1000
+local IDLE_KILL_MS = 30 * 1000
 
 local function dbg(msg)
   log.dbg("client", msg)
@@ -29,12 +41,70 @@ function M.setup(cb)
   on_message = cb
 end
 
+local function close_conn()
+  if idle_timer then
+    idle_timer:stop()
+    idle_timer:close()
+    idle_timer = nil
+  end
+  if conn and not conn:is_closing() then
+    conn:close()
+  end
+  conn = nil
+  send_frame = nil
+end
+
+local function start_idle_timer()
+  if idle_timer then
+    return
+  end
+  last_seen_ms = (vim.uv or vim.loop).now()
+  idle_timer = uv.new_timer()
+  idle_timer:start(
+    IDLE_CHECK_MS,
+    IDLE_CHECK_MS,
+    vim.schedule_wrap(function()
+      if not last_seen_ms then
+        return
+      end
+      local now = uv.now()
+      if now - last_seen_ms > IDLE_KILL_MS then
+        dbg("no inbound traffic for " .. (now - last_seen_ms) .. " ms — closing connection")
+        vim.notify("live-share: lost contact with host (no heartbeat) — disconnecting", vim.log.levels.WARN)
+        close_conn()
+      end
+    end)
+  )
+end
+
+local function send_raw(msg)
+  if not (conn and not conn:is_closing()) or not send_frame then
+    return
+  end
+  local ok, frame = pcall(function()
+    return send_frame(protocol.encode(msg, session_key))
+  end)
+  if ok and frame then
+    conn:write(frame)
+  end
+end
+
 local function dispatch_payloads(payloads)
+  if #payloads > 0 then
+    last_seen_ms = uv.now()
+  end
   for _, payload in ipairs(payloads) do
     local msg = protocol.decode(payload, session_key)
     if msg then
       dbg("msg '" .. tostring(msg.t) .. "' received")
-      if on_message then
+      -- Heartbeat: handled at this layer, never bubbled up.  A ping triggers
+      -- a matching pong; a pong is silently absorbed (last_seen above is the
+      -- only side effect we need).
+      if msg.t == "ping" then
+        send_raw({ t = "pong", ts = msg.ts })
+      elseif msg.t == "pong" then
+        -- nothing else to do; last_seen already bumped above.
+      elseif on_message then
         on_message(msg)
       end
     end
@@ -94,7 +164,8 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
         vim.notify("live-share: connected (tunnel relay)", vim.log.levels.INFO)
       end)
       send_frame = tcp_trans.frame
-      local reader = tcp_trans.new_reader()
+      local reader = tcp_trans.new_reader(MAX_MESSAGE_BYTES)
+      start_idle_timer()
       -- Send a zero-length probe so the server can detect raw TCP mode.
       -- Without this both sides wait for the other to write first.
       tcp:write("\x00\x00\x00\x00")
@@ -104,7 +175,14 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
           on_disconnect(read_err)
           return
         end
-        local payloads = reader(data)
+        local payloads, rerr = reader(data)
+        if not payloads then
+          vim.schedule(function()
+            vim.api.nvim_err_writeln("live-share: oversized frame from host — closing")
+          end)
+          on_disconnect(rerr)
+          return
+        end
         vim.schedule(function()
           dispatch_payloads(payloads)
         end)
@@ -116,10 +194,17 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
       local upgrade_req, _ws_key = ws_trans.client_upgrade(host)
       local state = "handshaking"
       local hs_buf = ""
-      local frame_reader = ws_trans.new_reader()
+      local frame_reader = ws_trans.new_reader(MAX_MESSAGE_BYTES)
 
       local function process_ws(data)
-        local payloads = frame_reader(data)
+        local payloads, rerr = frame_reader(data)
+        if not payloads then
+          vim.schedule(function()
+            vim.api.nvim_err_writeln("live-share: oversized frame from host — closing")
+          end)
+          on_disconnect(rerr)
+          return
+        end
         vim.schedule(function()
           dispatch_payloads(payloads)
         end)
@@ -155,6 +240,7 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
 
           dbg("WS handshake complete (encrypted=" .. tostring(session_key ~= nil) .. ")")
           state = "connected"
+          start_idle_timer()
           vim.schedule(function()
             vim.notify("live-share: connected (tunnel relay)", vim.log.levels.INFO)
           end)
@@ -217,12 +303,9 @@ function M.send(msg)
 end
 
 function M.stop()
-  if conn and not conn:is_closing() then
-    conn:close()
-    conn = nil
-  end
+  close_conn()
   session_key = nil
-  send_frame = nil
+  last_seen_ms = nil
 end
 
 return M

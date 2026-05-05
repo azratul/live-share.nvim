@@ -191,8 +191,10 @@ end
 -- ── Frame decode ────────────────────────────────────────────────────────────
 
 -- Returns a stateful decoder that handles TCP fragmentation.
--- Call fn(chunk) → list of binary payloads extracted from complete WS frames.
-function M.new_frame_reader()
+-- Call fn(chunk) → list of binary payloads extracted from complete WS frames,
+-- or nil + err string when a frame's declared length exceeds `max_bytes`.
+-- Caller should treat oversized as fatal and close the connection.
+function M.new_frame_reader(max_bytes)
   local buf = ""
 
   return function(data)
@@ -224,6 +226,10 @@ function M.new_frame_reader()
       else
         -- Ignore the high 4 bytes (messages < 4 GB)
         plen = buf:byte(7) * 16777216 + buf:byte(8) * 65536 + buf:byte(9) * 256 + buf:byte(10)
+      end
+
+      if max_bytes and plen > max_bytes then
+        return nil, "oversized"
       end
 
       if #buf < hdr_size + plen then

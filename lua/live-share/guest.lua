@@ -162,17 +162,28 @@ local function on_message(msg)
   -- ── hello ─────────────────────────────────────────────────────────────────
   if msg.t == "hello" then
     local protocol = require("live-share.collab.protocol")
+    -- Strict version check (v4): a mismatch is fatal.  Earlier versions only
+    -- warned, but with the lifecycle changes introduced in v4 (heartbeat
+    -- format, max-frame size, capability semantics) silent best-effort
+    -- interop is no longer safe — the session would either drift or stall.
     if msg.protocol_version and msg.protocol_version ~= protocol.VERSION then
+      local theirs = msg.protocol_version
       vim.schedule(function()
         vim.notify(
           string.format(
-            "live-share: protocol version mismatch (host=%d, ours=%d) — behaviour may be undefined",
-            msg.protocol_version,
+            "live-share: protocol version mismatch (host=%d, ours=%d) — disconnecting. "
+              .. "Both sides must run the same major version.",
+            theirs,
             protocol.VERSION
           ),
-          vim.log.levels.WARN
+          vim.log.levels.ERROR
         )
       end)
+      pcall(function()
+        conn:send({ t = "bye" })
+      end)
+      M.stop()
+      return
     end
 
     -- Validate required caps before acknowledging (§7.4).
