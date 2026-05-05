@@ -391,7 +391,14 @@ local function scan_via_walk(dir_root)
         break
       end
       for _, entry in ipairs(entries) do
-        if not ignore_set[entry.name] and entry.name:sub(1, 1) ~= "." then
+        -- Only the explicit ignore list filters here.  The previous "skip any
+        -- entry whose name starts with '.'" rule made `:LiveShareWorkspace`
+        -- inconsistent with `:LiveShareOpen` (the latter accepts dotfiles via
+        -- safe_abs/read_file), and silently hid wanted content like
+        -- `.github/`, `.editorconfig`, `.eslintrc`, `.gitignore`, …  Sensitive
+        -- dotfiles (`.env`, `.ssh/`, `.aws/`, `.kube/`, …) are still excluded
+        -- by `is_sensitive()` below.
+        if not ignore_set[entry.name] then
           local rel = prefix ~= "" and (prefix .. "/" .. entry.name) or entry.name
           if entry.type == "file" then
             if not is_sensitive(rel) then

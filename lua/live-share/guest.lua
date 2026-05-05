@@ -136,14 +136,16 @@ local function on_message(msg)
     end
   end
 
-  -- State gate: during workspace_sync buffer patches/cursors; allow only init
-  -- messages and safety signals (bye/error/rejected) to pass through.
+  -- State gate: during workspace_sync buffer patches/cursors and any other
+  -- application-level messages (file_response, open_file, close_file, focus,
+  -- terminal_*) so they replay after `open_files_snapshot` switches us to
+  -- "active".  Previously these were silently dropped, which on a large
+  -- workspace caused `:LiveShareOpen` issued right after approval to look
+  -- like it did nothing — `file_response` arrived while the guest was still
+  -- decoding the huge `workspace_info` and was discarded.  Only init and
+  -- safety messages bypass the buffer.
   if state == "workspace_sync" then
-    if msg.t == "patch" or msg.t == "cursor" then
-      msg_buffer[#msg_buffer + 1] = msg
-      return
-    end
-    local ws_allowed = {
+    local init_or_safety = {
       workspace_info = true,
       peers_snapshot = true,
       open_files_snapshot = true,
@@ -151,7 +153,8 @@ local function on_message(msg)
       rejected = true,
       error = true,
     }
-    if not ws_allowed[msg.t] then
+    if not init_or_safety[msg.t] then
+      msg_buffer[#msg_buffer + 1] = msg
       return
     end
   end

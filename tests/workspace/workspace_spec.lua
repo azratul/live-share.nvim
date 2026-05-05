@@ -297,11 +297,12 @@ describe("workspace", function()
       write(root .. "/.gitignore", "secret.txt\n")
       write(root .. "/keep.txt", "ok")
       write(root .. "/secret.txt", "no")
-      -- Walk mode doesn't read .gitignore, so secret.txt would normally appear,
-      -- but the dotfile rule still hides .gitignore itself.
+      -- Walk mode no longer hides every dotfile, only the explicit ignore set
+      -- (`.git`, `.venv`, …).  `.gitignore` is now listed; `.git/` is not.
+      -- The walker also doesn't honour gitignore content, so secret.txt shows.
       local files = workspace.scan()
       table.sort(files)
-      assert.same({ "keep.txt", "secret.txt" }, files)
+      assert.same({ ".gitignore", "keep.txt", "secret.txt" }, files)
     end)
   end)
 end)
