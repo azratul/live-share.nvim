@@ -9,6 +9,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Security
+- **Server-side defence-in-depth (stage 1 of v4 migration; no protocol bump)**
+  — three host-side validations applied before any guest message reaches a
+  handler:
+  - **peer_id binding** — `server.lua` dispatch overwrites the `msg.peer`
+    field of every wire message with the connection's authoritative peer_id.
+    A malicious guest can no longer spoof cursor/focus/bye broadcasts as if
+    they came from a different peer.
+  - **Path validation on every message that carries a `path`** — `host.lua`
+    pre-checks `msg.path` against `workspace.path_allowed()` (sandbox check
+    + sensitive-file blocklist) for any incoming message; failures are
+    audit-logged as `path_rejected{peer_id, msg_type, path}` and dropped.
+    Closes the gap where a `cursor` or `focus` message with
+    `path = "../../etc/passwd"` would be broadcast verbatim to other peers
+    and pollute their presence/follow state.
+  - **Per-peer rate limit on `patch` and `cursor`** — token bucket in
+    `server.lua`, defaults 100 patches/s and 60 cursors/s per peer (1 s
+    burst).  Excess messages are silently dropped; debug-logged.  Defends
+    against a buggy or malicious guest saturating the host's main loop.
+  Tests: `tests/integration/stage1_spec.lua` (9 tests covering peer_id
+  binding, path_allowed semantics for traversal/absolute/NUL/sensitive/empty,
+  burst dropping, and below-cap pass-through).
+
+### Security (previous unreleased entries)
 - **Workspace sandbox hardening** — `lua/live-share/workspace.lua` now resolves
   every requested path through `uv.fs_realpath` and verifies the resolved path
   is contained inside `realpath(workspace_root)`. Closes a class of path

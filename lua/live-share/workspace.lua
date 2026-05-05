@@ -230,6 +230,23 @@ local function sandbox_check(path)
   return true
 end
 
+-- Returns true iff the given workspace-relative path is safe to act on:
+-- non-empty, no NUL bytes, no traversal segments, no absolute prefix, no
+-- drive letter, and not on the sensitive-file blocklist.  Used as a single
+-- gate by the host on every incoming message that carries a `path` field, so
+-- a malicious guest can't pollute presence/follow state with bogus paths via
+-- `cursor`, `focus`, or `terminal_*` broadcasts.
+function M.path_allowed(path)
+  local ok = sandbox_check(path)
+  if not ok then
+    return false
+  end
+  if is_sensitive(path) then
+    return false
+  end
+  return true
+end
+
 -- Returns the absolute on-disk path if it's safely inside the workspace.
 -- For new files (which don't exist yet), the parent directory must resolve
 -- inside the workspace root.

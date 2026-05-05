@@ -186,7 +186,29 @@ end
 
 -- ── Message dispatch ──────────────────────────────────────────────────────────
 
+-- Messages from guests may include a `path` field as a workspace-relative
+-- string.  Defence-in-depth: validate any such path against the same rules
+-- the workspace sandbox uses (no traversal, no absolute, no NUL, not on the
+-- sensitive blocklist) before letting the message reach a handler.  Without
+-- this, a malicious guest could pollute presence/follow state for other
+-- guests via cursor/focus broadcasts containing paths like `../../etc/passwd`.
+local function path_field_ok(msg, from_peer)
+  if msg.path == nil then
+    return true
+  end
+  if type(msg.path) ~= "string" or not workspace.path_allowed(msg.path) then
+    audit.log("path_rejected", { peer_id = from_peer, msg_type = msg.t, path = tostring(msg.path) })
+    log.dbg("host", "rejected " .. tostring(msg.t) .. " from peer " .. from_peer .. ": invalid path")
+    return false
+  end
+  return true
+end
+
 local function on_message(msg, from_peer)
+  if not path_field_ok(msg, from_peer) then
+    return
+  end
+
   -- ── connect ──────────────────────────────────────────────────────────────
   if msg.t == "connect" then
     audit.log("peer_connect_request", { peer_id = from_peer })

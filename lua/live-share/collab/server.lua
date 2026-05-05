@@ -26,9 +26,45 @@ local pending = {} -- peer_id -> { handle, framer, mode }  (awaiting host approv
 local clients = {} -- peer_id -> { handle, framer, mode }  (approved peers)
 local peer_roles = {} -- peer_id -> "rw" | "ro"
 local peer_names = {} -- peer_id -> name (for synthesising bye on abrupt disconnect)
+local rate_buckets = {} -- peer_id -> { [kind] = { tokens, last_ms } }  (token-bucket rate limit)
 local next_peer = 1
 local on_message = nil
 local session_key = nil
+
+-- Per-peer rate limits.  Defends against a malicious or buggy guest spamming
+-- patches/cursors and saturating the host's main loop.  Numbers are generous
+-- enough for normal interactive editing (a fast typist generates ~10 patches
+-- per second; cursor moves are debounced at 100 ms ≈ 10/s).
+local RATE_LIMITS = {
+  patch = 100, -- patches per second per peer
+  cursor = 60, -- cursor updates per second per peer
+}
+
+-- Token bucket: refills at `rate` tokens/sec up to capacity = rate (= 1 s burst).
+-- Returns true iff a token is available and consumes it.
+local function rate_allow(peer_id, kind)
+  local rate = RATE_LIMITS[kind]
+  if not rate then
+    return true
+  end
+  local now = uv.now()
+  rate_buckets[peer_id] = rate_buckets[peer_id] or {}
+  local bucket = rate_buckets[peer_id][kind]
+  if not bucket then
+    bucket = { tokens = rate, last_ms = now }
+    rate_buckets[peer_id][kind] = bucket
+  end
+  local elapsed = now - bucket.last_ms
+  if elapsed > 0 then
+    bucket.tokens = math.min(rate, bucket.tokens + elapsed * rate / 1000)
+    bucket.last_ms = now
+  end
+  if bucket.tokens >= 1 then
+    bucket.tokens = bucket.tokens - 1
+    return true
+  end
+  return false
+end
 
 -- Module-level framers so broadcast can use them as stable cache keys.
 local function ws_framer(payload)
@@ -95,6 +131,18 @@ function M.start(ip, port, key)
         })
         return
       end
+      -- Per-peer rate limit (defends against patch/cursor flooding).
+      if not rate_allow(peer_id, msg.t) then
+        dbg("peer " .. peer_id .. " rate-limited (" .. tostring(msg.t) .. ")")
+        return
+      end
+      -- peer_id binding: never trust a `peer` field set by the client.  The
+      -- only authoritative identity is the connection's peer_id.  Without
+      -- this, a malicious guest could spoof cursor/focus/bye broadcasts
+      -- attributed to other peers.
+      if msg.peer ~= nil then
+        msg.peer = peer_id
+      end
       vim.schedule(function()
         dbg("msg '" .. tostring(msg.t) .. "' from peer " .. peer_id)
         if on_message then
@@ -109,6 +157,7 @@ function M.start(ip, port, key)
         pending[peer_id] = nil
         clients[peer_id] = nil
         peer_roles[peer_id] = nil
+        rate_buckets[peer_id] = nil
         local name = peer_names[peer_id]
         peer_names[peer_id] = nil
         if on_message then
@@ -319,6 +368,7 @@ function M.kick(peer_id)
   pending[peer_id] = nil
   peer_roles[peer_id] = nil
   peer_names[peer_id] = nil
+  rate_buckets[peer_id] = nil
   dbg("peer " .. peer_id .. " kicked")
   return true
 end
@@ -338,6 +388,7 @@ function M.stop()
   clients = {}
   peer_roles = {}
   peer_names = {}
+  rate_buckets = {}
   next_peer = 1
   session_key = nil
   if srv and not srv:is_closing() then
