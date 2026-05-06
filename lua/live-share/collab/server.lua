@@ -73,6 +73,19 @@ local RATE_LIMITS = {
   cursor = 60, -- cursor updates per second per peer
 }
 
+-- Hex encoder for SHA-256 digests stamped onto inbound messages
+-- (`msg.__payload_hash`) for the audit log.
+local HEX = "0123456789abcdef"
+local function to_hex(bytes)
+  local out = {}
+  for i = 1, #bytes do
+    local b = bytes:byte(i)
+    out[#out + 1] = HEX:sub(math.floor(b / 16) + 1, math.floor(b / 16) + 1)
+    out[#out + 1] = HEX:sub(b % 16 + 1, b % 16 + 1)
+  end
+  return table.concat(out)
+end
+
 -- Token bucket: refills at `rate` tokens/sec up to capacity = rate (= 1 s burst).
 -- Returns true iff a token is available and consumes it.
 local function rate_allow(peer_id, kind)
@@ -377,6 +390,15 @@ function M.start(ip, port, key)
           -- (or relabelling a recorded message) would fail GCM verification.
           local msg = r.decryptor:decode(payload, peer_id)
           if msg then
+            -- Stamp the inbound encrypted payload's SHA-256 onto the message
+            -- so the audit log (host.lua) can record `payload_hash` for the
+            -- exact ciphertext that triggered the event — useful when later
+            -- correlating the audit trail against a packet capture.  The
+            -- hash is over the full `[salt][counter][ciphertext+tag]` blob.
+            local digest = crypto.sha256(payload)
+            if digest then
+              msg.__payload_hash = to_hex(digest)
+            end
             dispatch(msg)
           end
         end

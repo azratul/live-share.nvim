@@ -197,7 +197,12 @@ local function path_field_ok(msg, from_peer)
     return true
   end
   if type(msg.path) ~= "string" or not workspace.path_allowed(msg.path) then
-    audit.log("path_rejected", { peer_id = from_peer, msg_type = msg.t, path = tostring(msg.path) })
+    audit.log("path_rejected", {
+      peer_id = from_peer,
+      msg_type = msg.t,
+      path = tostring(msg.path),
+      payload_hash = msg.__payload_hash,
+    })
     log.dbg("host", "rejected " .. tostring(msg.t) .. " from peer " .. from_peer .. ": invalid path")
     return false
   end
@@ -211,7 +216,7 @@ local function on_message(msg, from_peer)
 
   -- ── connect ──────────────────────────────────────────────────────────────
   if msg.t == "connect" then
-    audit.log("peer_connect_request", { peer_id = from_peer })
+    audit.log("peer_connect_request", { peer_id = from_peer, payload_hash = msg.__payload_hash })
     -- Step 1: host approves or denies the incoming connection.
     vim.ui.select(
       { "Allow", "Deny" },
@@ -304,7 +309,7 @@ local function on_message(msg, from_peer)
     if msg.caps then
       log.dbg("host", "guest " .. from_peer .. " caps: " .. vim.inspect(msg.caps))
     end
-    audit.log("peer_joined", { peer_id = from_peer, peer_name = msg.name })
+    audit.log("peer_joined", { peer_id = from_peer, peer_name = msg.name, payload_hash = msg.__payload_hash })
     vim.schedule(function()
       vim.api.nvim_out_write("live-share: " .. label .. " joined as peer #" .. from_peer .. "\n")
     end)
@@ -336,7 +341,12 @@ local function on_message(msg, from_peer)
     end
 
     if denied_reason then
-      audit.log("file_request_denied", { peer_id = from_peer, path = path, reason = denied_reason })
+      audit.log("file_request_denied", {
+        peer_id = from_peer,
+        path = path,
+        reason = denied_reason,
+        payload_hash = msg.__payload_hash,
+      })
       conn:send(from_peer, {
         t = "error",
         code = "file_not_found",
@@ -346,7 +356,7 @@ local function on_message(msg, from_peer)
       return
     end
 
-    audit.log("file_request_allowed", { peer_id = from_peer, path = path })
+    audit.log("file_request_allowed", { peer_id = from_peer, path = path, payload_hash = msg.__payload_hash })
     conn:send(from_peer, {
       t = "file_response",
       path = path,
@@ -366,7 +376,7 @@ local function on_message(msg, from_peer)
     -- or against sensitive files (defence-in-depth: server.lua already rejects
     -- ro guests, but a misbehaving rw guest could still try a stray path).
     if workspace.is_sensitive(path) then
-      audit.log("patch_rejected_sensitive", { peer_id = from_peer, path = path })
+      audit.log("patch_rejected_sensitive", { peer_id = from_peer, path = path, payload_hash = msg.__payload_hash })
       return
     end
 
@@ -440,7 +450,11 @@ local function on_message(msg, from_peer)
   elseif msg.t == "bye" then
     presence.remove_peer(from_peer)
     conn:broadcast({ t = "bye", peer = from_peer, name = msg.name }, from_peer)
-    audit.log("peer_disconnected", { peer_id = from_peer, peer_name = msg.name })
+    audit.log("peer_disconnected", {
+      peer_id = from_peer,
+      peer_name = msg.name,
+      payload_hash = msg.__payload_hash,
+    })
     vim.schedule(function()
       local label = msg.name or ("guest " .. from_peer)
       vim.api.nvim_out_write("live-share: " .. label .. " left\n")

@@ -18,6 +18,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stages land and `develop` is merged to Nightly.
 
 ### Security
+- **Tamper-evident audit log (stage 5 of v4 migration; host-only, no wire change)**
+  — every entry written to the host's audit log (`stdpath('state')/live-share-audit.log`
+  by default) now carries `seq` (monotonic per-session counter), `prev_hash`
+  (hex SHA-256 of the previous JSON line, verbatim), and an optional
+  `payload_hash` (hex SHA-256 of the inbound encrypted envelope that
+  triggered the event).
+  - **Chain** — verifying a log is a single linear walk: for line N, the
+    `prev_hash` field MUST equal `SHA-256(line N-1)`. The first line of
+    a fresh file uses 64 zero hex characters as the genesis value; on
+    a file that already has prior sessions, the new session's first
+    record's `prev_hash` is set to the SHA-256 of the file's tail line,
+    so deleting earlier sessions invalidates the chain head.
+  - **Payload correlator** — when an inbound encrypted message is the
+    direct cause of an audit entry (`peer_connect_request`, `peer_joined`,
+    `file_request_allowed`, `file_request_denied`, `patch_rejected_sensitive`,
+    `peer_disconnected`, `path_rejected`), the host stamps the payload's
+    SHA-256 onto the record. Lets an investigator reconcile the audit
+    trail with a packet capture without ever recording plaintext.
+    Host-initiated events (`session_start`, `session_stop`, `peer_kicked`,
+    `peer_approved`, `peer_denied`, `role_changed`, `terminal_opened`)
+    omit `payload_hash` because they are not triggered by a wire message.
+  - **No wire impact** — `protocol_version` stays at 4. v4 clients
+    don't need to know about the audit format. The chain is purely a
+    forensic property of the host-side log.
+  - **Threat model** — detects offline tampering with the file (line
+    edits, reorder, mid-file truncation). Does **not** prevent a live
+    root attacker from rewriting the chain entirely; that is out of
+    scope. `payload_hash` is **not** an authenticator (the GCM tag is) —
+    it is purely a correlator.
+  - **OpenSSL absent** — `audit.hash` returns `nil` and the chain
+    degrades gracefully (records still written, but `prev_hash` stays
+    at the prior value). Plaintext sessions already warn loudly; the
+    chain breakage is an expected consequence of running without
+    OpenSSL.
+  See `PROTOCOL.md` §7.6 for the verification algorithm. Tests:
+  `tests/audit/audit_spec.lua` (chain genesis, per-record SHA-256
+  match, cross-session continuity, payload_hash pass-through, seq
+  monotonicity).
+
 - **Forward secrecy via X25519 ECDH (stage 4 of v4 migration; extends v4 in place)**
   — the URL-fragment master key (the PSK) no longer encrypts traffic
   directly.  Each peer pair runs an ephemeral X25519 handshake at session

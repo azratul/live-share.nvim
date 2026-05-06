@@ -269,7 +269,7 @@ The `hello` message carries a `protocol_version` integer field. From v4 onward c
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 | 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
-| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3); X25519 forward-secrecy handshake (`dh_offer`/`dh_accept`) with HKDF-derived per-peer subkeys (§2.4). Future Stage 5–6 changes (audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
+| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3); X25519 forward-secrecy handshake (`dh_offer`/`dh_accept`) with HKDF-derived per-peer subkeys (§2.4); tamper-evident host-side audit log with per-record SHA-256 chain and optional `payload_hash` correlator (§7.6, no wire change). Future Stage 6 (chunked workspace info) will land under the same v4 number before merge to Nightly. |
 
 ---
 
@@ -587,6 +587,30 @@ The following ceilings are enforced at the transport layer. Frames violating the
 | Idle-kill threshold | 30 s | A peer with no inbound frames for this long is closed (≈ two missed pings). |
 
 Clients **must not** assume any specific ceiling; the values above are the host-side defaults. New connections that disconnect immediately and consistently should be debugged by checking message size first.
+
+### 7.6 Audit Log Forensics (v4+, host-only, no wire impact)
+
+The host writes an append-only JSONL audit log (`stdpath('state')/live-share-audit.log` by default; disable with `audit_log = false` or override the path in `setup({ audit_log = "/path" })`). This section is purely informational for tooling that wants to verify a log; the file format is host-private and never crosses the wire.
+
+Each record carries the following fields in addition to event-specific data:
+
+| Field | Type | Purpose |
+| :--- | :--- | :--- |
+| `ts` | string (ISO-8601 UTC) | Wall-clock timestamp when the record was written. |
+| `seq` | integer | Monotonic counter, starts at 1 on each session and increments per record. |
+| `event` | string | Short event name (`session_start`, `peer_joined`, `file_request_allowed`, …). |
+| `sid` | string | Session ID set by the host on `session_start`. |
+| `prev_hash` | hex string (64) | SHA-256 of the previous JSON line (verbatim, **no trailing newline**). The very first record ever written to a fresh file uses 64 zero hex characters as the genesis value. |
+| `payload_hash` | hex string (64), optional | Present on records triggered by an inbound encrypted protocol message. Equal to SHA-256 over the full `[salt][counter][ciphertext+tag]` envelope (i.e. the bytes the transport reader handed to `protocol.decode`). Lets an investigator correlate the audit trail with a packet capture without ever recording plaintext. |
+
+**Verification algorithm:**
+
+1. Read the file line by line, preserving each line verbatim (no whitespace normalisation).
+2. For line N > 1, recompute SHA-256 of line N−1 and compare against line N's `prev_hash`. Any mismatch ⇒ the log was tampered with at or before line N.
+3. The first line's `prev_hash` MUST be either 64 zero hex characters (genesis) or SHA-256 of a previously truncated tail. The chain is continuous across host restarts on the same file: a new session's first record's `prev_hash` is the hash of the prior session's last line, so deleting earlier sessions invalidates the new session's chain head.
+4. `seq` resets to 1 at every `session_start`; gaps within a session indicate dropped writes (the file open is non-blocking and silently no-ops on I/O errors).
+
+**Threat model:** the chain detects offline edits to the log file (replacing a line, reordering, truncating mid-file). It does **not** prevent an attacker who has live root on the host from rewriting the chain entirely — that is out of scope. `payload_hash` does not authenticate the wire (the GCM tag does that); it exists so that a recorded `peer_joined` / `file_request_*` entry can be tied back to a specific encrypted frame on the wire.
 
 ---
 
