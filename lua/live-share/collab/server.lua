@@ -18,6 +18,7 @@ local M = {}
 local protocol = require("live-share.collab.protocol")
 local tcp_trans = require("live-share.collab.transport.tcp")
 local ws_trans = require("live-share.collab.transport.ws")
+local crypto = require("live-share.collab.crypto")
 local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
@@ -32,11 +33,16 @@ local heartbeat_timer = nil
 local next_peer = 1
 local on_message = nil
 local session_key = nil
--- v4 AEAD: one outbound encryptor for the host (from_peer always = 0) and one
--- decryptor used for every inbound connection (from_peer is the connection's
--- authoritative peer_id, supplied per-call).
-local encryptor = nil
-local decryptor = nil
+-- v4 forward secrecy (stage 4): each peer gets its own ephemeral X25519
+-- handshake (`dh_offer`/`dh_accept`) and its own AEAD subkey derived via
+-- HKDF.  The URL-fragment master key is no longer used to encrypt traffic
+-- directly — it acts as a pre-shared key (PSK) authenticating the public
+-- keys via HMAC-SHA256.  Encryptor/decryptor live on the per-peer record.
+--
+-- Subkey derivation (RFC 5869):
+--   PRK = HMAC(salt = PSK, IKM = X25519(my_priv, peer_pub))
+--   subkey = HKDF-Expand(PRK, info = "ls-v4-subkey|" || peer_id_be4, L = 32)
+local SUBKEY_INFO_PREFIX = "ls-v4-subkey|"
 
 -- Maximum bytes per protocol frame.  Frames declaring a length above this are
 -- dropped at the transport reader before any allocation, and the connection
@@ -132,9 +138,9 @@ local function start_heartbeat()
         if now - seen > IDLE_KILL_MS then
           dbg("peer " .. pid .. " idle for " .. (now - seen) .. " ms — closing")
           close_peer(pid, "idle timeout")
-        elseif not c.handle:is_closing() then
+        elseif not c.handle:is_closing() and c.encryptor then
           local ok, frame = pcall(function()
-            return c.framer(encryptor:encode({ t = "ping", ts = now }))
+            return c.framer(c.encryptor:encode({ t = "ping", ts = now }))
           end)
           if ok and frame then
             c.handle:write(frame)
@@ -153,13 +159,29 @@ local function stop_heartbeat()
   end
 end
 
+-- Encode peer_id as 4-byte big-endian for HKDF info binding.
+local function u32_be(n)
+  return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
+end
+
+-- Derive a 32-byte AEAD subkey from a peer's X25519 shared secret.  Both
+-- sides feed the same PSK (the URL fragment master key) and the same
+-- peer_id, so they end up with the same subkey without ever transmitting it.
+local function derive_subkey(shared, peer_id)
+  return crypto.hkdf_sha256(shared, session_key, SUBKEY_INFO_PREFIX .. u32_be(peer_id), 32)
+end
+
+-- Build a fresh encryptor/decryptor pair bound to `subkey`.  Host is always
+-- from_peer = 0 on outbound; the inbound peer_id is supplied by the caller
+-- at decode time (see process()).
+local function make_codec(subkey)
+  return protocol.new_encryptor(subkey, function()
+    return 0
+  end), protocol.new_decryptor(subkey)
+end
+
 function M.start(ip, port, key)
   session_key = key
-  -- Host's outbound peer_id is always 0; the lambda is purely formal.
-  encryptor = protocol.new_encryptor(key, function()
-    return 0
-  end)
-  decryptor = protocol.new_decryptor(key)
   srv = uv.new_tcp()
   local ok, err = srv:bind(ip, port)
   if not ok then
@@ -191,6 +213,13 @@ function M.start(ip, port, key)
     local state = "detecting"
     local buf = ""
     local reader = nil -- stateful fn(chunk) → { payload, ... }; set at detection time
+    -- The peer record is created at detection time and stored in `pending`
+    -- (and later `clients`); the closure below references it through the
+    -- `peer_id` lookup so that codec swaps after the DH handshake reach
+    -- subsequent reads/writes.
+    local function rec()
+      return pending[peer_id] or clients[peer_id]
+    end
 
     local function dispatch(msg)
       -- Drop messages from unapproved peers (they're still in pending).
@@ -259,6 +288,55 @@ function M.start(ip, port, key)
       end
     end
 
+    -- Handle the guest's reply to dh_offer: verify HMAC over their public
+    -- key with the URL-fragment PSK, derive the per-peer subkey via X25519
+    -- + HKDF, and swap the peer's encryptor/decryptor to use it.  Only
+    -- after this completes does the synthetic `connect` event fire — the
+    -- host.lua approval prompt then runs against an authenticated channel.
+    local function finish_dh(msg)
+      local r = rec()
+      if not r or msg.t ~= "dh_accept" or type(msg.pub) ~= "string" or type(msg.hmac) ~= "string" then
+        dbg("peer " .. peer_id .. " — protocol violation during DH: " .. tostring(msg and msg.t))
+        on_disconnect("dh violation")
+        return false
+      end
+      local their_pub = crypto.b64url_decode(msg.pub)
+      local their_hmac = crypto.b64url_decode(msg.hmac)
+      if #their_pub ~= 32 or #their_hmac ~= 32 then
+        dbg("peer " .. peer_id .. " — malformed DH key/HMAC")
+        on_disconnect("dh shape")
+        return false
+      end
+      local expected = crypto.hmac_sha256(session_key, their_pub)
+      if not expected or expected ~= their_hmac then
+        dbg("peer " .. peer_id .. " — DH HMAC mismatch (PSK wrong or MITM); closing")
+        on_disconnect("dh hmac")
+        return false
+      end
+      local shared, derr = crypto.x25519_shared(r.dh_priv, their_pub)
+      if not shared then
+        dbg("peer " .. peer_id .. " — X25519 derive failed: " .. tostring(derr))
+        on_disconnect("dh derive")
+        return false
+      end
+      local subkey = derive_subkey(shared, peer_id)
+      if not subkey then
+        dbg("peer " .. peer_id .. " — HKDF failed")
+        on_disconnect("dh hkdf")
+        return false
+      end
+      r.encryptor, r.decryptor = make_codec(subkey)
+      r.dh_priv = nil
+      r.dh_state = "established"
+      dbg("peer " .. peer_id .. " — DH established, switching to per-peer subkey")
+      vim.schedule(function()
+        if on_message then
+          on_message({ t = "connect", peer = peer_id }, peer_id)
+        end
+      end)
+      return true
+    end
+
     local function process(data)
       local payloads, rerr = reader(data)
       if not payloads then
@@ -273,14 +351,88 @@ function M.start(ip, port, key)
         last_seen[peer_id] = uv.now()
       end
       for _, payload in ipairs(payloads) do
-        -- AAD on inbound binds the message to the connection's authoritative
-        -- peer_id; an attacker swapping the ciphertext between connections
-        -- (or relabelling a recorded message) would fail GCM verification.
-        local msg = decryptor:decode(payload, peer_id)
-        if msg then
-          dispatch(msg)
+        local r = rec()
+        if not r then
+          return
         end
+        if r.dh_state == "awaiting_accept" then
+          -- The TCP-mode 4-byte probe (`\x00\x00\x00\x00`) decodes as a
+          -- zero-length payload; that's a transport artefact, not a real
+          -- message — skip silently.  Anything else must be valid JSON.
+          if #payload == 0 then
+            goto continue_payload
+          end
+          local ok, parsed = pcall(vim.json.decode, payload)
+          if not ok or type(parsed) ~= "table" then
+            dbg("peer " .. peer_id .. " — invalid pre-DH payload; closing")
+            on_disconnect("dh parse")
+            return
+          end
+          if not finish_dh(parsed) then
+            return
+          end
+        else
+          -- AAD on inbound binds the message to the connection's authoritative
+          -- peer_id; an attacker swapping the ciphertext between connections
+          -- (or relabelling a recorded message) would fail GCM verification.
+          local msg = r.decryptor:decode(payload, peer_id)
+          if msg then
+            dispatch(msg)
+          end
+        end
+        ::continue_payload::
       end
+    end
+
+    -- Generate an ephemeral X25519 keypair, send `dh_offer` plaintext-framed
+    -- with PSK-HMAC over the public key, and stash the private key on the
+    -- peer record so finish_dh() can complete the exchange when the guest
+    -- replies.  Returns false on any local crypto failure (and closes the
+    -- connection); v4 sessions with a key cannot proceed without DH.
+    local function start_dh()
+      local r = rec()
+      if not r then
+        return false
+      end
+      local priv, pub = crypto.x25519_keypair()
+      if not priv or not pub then
+        dbg("peer " .. peer_id .. " — X25519 keygen failed; closing")
+        on_disconnect("dh keygen")
+        return false
+      end
+      local hmac = crypto.hmac_sha256(session_key, pub)
+      if not hmac then
+        dbg("peer " .. peer_id .. " — HMAC failed; closing")
+        on_disconnect("dh hmac-gen")
+        return false
+      end
+      r.dh_priv = priv
+      r.dh_state = "awaiting_accept"
+      local payload = vim.json.encode({
+        t = "dh_offer",
+        peer_id = peer_id,
+        pub = crypto.b64url_encode(pub),
+        hmac = crypto.b64url_encode(hmac),
+      })
+      conn:write(r.framer(payload))
+      dbg("peer " .. peer_id .. " — dh_offer sent, awaiting accept")
+      return true
+    end
+
+    -- Initialise the peer record's codec.  In plaintext sessions both
+    -- encryptor and decryptor are the JSON-only fallback returned by
+    -- protocol.new_*(nil); in encrypted sessions they start as plaintext
+    -- too (so the dh_offer/dh_accept exchange itself rides as JSON) and
+    -- are swapped inside finish_dh() once the subkey is derived.
+    local function init_peer_record(framer, mode)
+      pending[peer_id] = {
+        handle = conn,
+        framer = framer,
+        mode = mode,
+        encryptor = protocol.new_encryptor(nil, nil),
+        decryptor = protocol.new_decryptor(nil),
+        dh_state = nil,
+      }
     end
 
     -- Arms the pending-peer timeout.  Called once we know the transport mode.
@@ -303,6 +455,24 @@ function M.start(ip, port, key)
       )
     end
 
+    -- Decide whether to start the DH handshake or fire the synthetic
+    -- `connect` event directly.  Encrypted sessions defer the connect
+    -- event until DH completes (finish_dh schedules it).
+    local function after_detect()
+      arm_pending_timeout()
+      if session_key then
+        if not start_dh() then
+          return
+        end
+      else
+        vim.schedule(function()
+          if on_message then
+            on_message({ t = "connect", peer = peer_id }, peer_id)
+          end
+        end)
+      end
+    end
+
     local function complete_ws_handshake(initial_buf)
       local response, rest, err_msg = ws_trans.server_handshake_response(initial_buf)
       if response == nil then
@@ -319,14 +489,9 @@ function M.start(ip, port, key)
 
       conn:write(response)
       state = "ws"
-      pending[peer_id] = { handle = conn, framer = ws_framer, mode = "ws" }
-      arm_pending_timeout()
-      dbg("peer " .. peer_id .. " WS handshake done — awaiting host approval")
-      vim.schedule(function()
-        if on_message then
-          on_message({ t = "connect", peer = peer_id }, peer_id)
-        end
-      end)
+      init_peer_record(ws_framer, "ws")
+      dbg("peer " .. peer_id .. " WS handshake done")
+      after_detect()
       if #rest > 0 then
         process(rest)
       end
@@ -353,14 +518,9 @@ function M.start(ip, port, key)
         else
           state = "tcp"
           reader = tcp_trans.new_reader(MAX_MESSAGE_BYTES)
-          pending[peer_id] = { handle = conn, framer = tcp_framer, mode = "tcp" }
-          arm_pending_timeout()
-          dbg("peer " .. peer_id .. " → raw TCP mode — awaiting host approval")
-          vim.schedule(function()
-            if on_message then
-              on_message({ t = "connect", peer = peer_id }, peer_id)
-            end
-          end)
+          init_peer_record(tcp_framer, "tcp")
+          dbg("peer " .. peer_id .. " → raw TCP mode")
+          after_detect()
           process(buf)
           buf = ""
           return
@@ -436,8 +596,11 @@ function M.reject(peer_id, msg)
     p.pending_timer:close()
     p.pending_timer = nil
   end
+  -- p.encryptor may still be the plaintext fallback if the peer was
+  -- rejected pre-DH — that's fine, the rejection message just goes out
+  -- in plaintext like the dh_offer would have.
   local ok, frame = pcall(function()
-    return p.framer(encryptor:encode(msg))
+    return p.framer(p.encryptor:encode(msg))
   end)
   if ok and frame then
     p.handle:write(frame)
@@ -469,7 +632,7 @@ function M.send(peer_id, msg)
   end
   dbg("sending '" .. tostring(msg.t) .. "' to peer " .. peer_id)
   local ok, result = pcall(function()
-    return c.framer(encryptor:encode(msg))
+    return c.framer(c.encryptor:encode(msg))
   end)
   if ok and result then
     c.handle:write(result)
@@ -479,23 +642,19 @@ function M.send(peer_id, msg)
 end
 
 function M.broadcast(msg, except_peer)
-  -- Encode payload once; frame once per transport type.  All recipients see
-  -- the same nonce + AAD because from_peer is always 0 (host) on outbound.
-  local payload = nil
-  local framed = {} -- mode tag → framed bytes
+  -- Per-peer subkeys mean each recipient needs its own ciphertext: encode is
+  -- now O(N) instead of O(1).  Counter increments per encode, salt stays
+  -- constant per peer.  Plaintext sessions still produce identical bytes per
+  -- peer, but the cost of re-encoding JSON is negligible.
   for pid, c in pairs(clients) do
-    if pid == except_peer or c.handle:is_closing() then
-      goto continue
+    if pid ~= except_peer and not c.handle:is_closing() and c.encryptor then
+      local ok, result = pcall(function()
+        return c.framer(c.encryptor:encode(msg))
+      end)
+      if ok and result then
+        c.handle:write(result)
+      end
     end
-
-    if not payload then
-      payload = encryptor:encode(msg)
-    end
-    if not framed[c.mode] then
-      framed[c.mode] = c.framer(payload)
-    end
-    c.handle:write(framed[c.mode])
-    ::continue::
   end
 end
 
@@ -566,8 +725,6 @@ function M.stop()
   last_seen = {}
   next_peer = 1
   session_key = nil
-  encryptor = nil
-  decryptor = nil
   if srv and not srv:is_closing() then
     srv:close()
     srv = nil

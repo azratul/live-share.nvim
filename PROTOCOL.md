@@ -173,6 +173,47 @@ The wire format is incompatible with v3 at the cryptographic layer: a v3 receive
 
 **Punch transport exception.** When `transport = "punch"` is in use, channel-level AES-GCM is provided by the `punch` library and the §2.3 envelope is *not* applied. Payloads on the wire are plain JSON. See §1.3.3.
 
+### 2.4 Forward-Secrecy Handshake (v4)
+
+The URL-fragment key is no longer used to encrypt traffic directly. It acts as a Pre-Shared Key (PSK) that authenticates a fresh ephemeral Diffie–Hellman exchange run at the start of every connection. The actual AEAD subkey is derived from the DH shared secret, so a future compromise of the URL fragment cannot decrypt recorded ciphertext.
+
+#### 2.4.1 Wire flow
+
+1. After TCP/WS detection, before any other traffic, the **host** sends `dh_offer` (plaintext JSON in a normal framed payload):
+   ```json
+   {
+     "t": "dh_offer",
+     "peer_id": 3,
+     "pub":  "<base64url 32-byte X25519 public key>",
+     "hmac": "<base64url 32-byte HMAC-SHA256(PSK, pub)>"
+   }
+   ```
+2. The **guest** verifies the HMAC against its copy of the PSK (a mismatch ⇒ disconnect — either the URL was rewritten in transit or the guest decoded the fragment wrong). It generates its own ephemeral X25519 keypair and replies with `dh_accept`:
+   ```json
+   { "t": "dh_accept", "pub": "<…>", "hmac": "<…>" }
+   ```
+3. The **host** verifies the guest's HMAC the same way. Both sides compute the X25519 shared secret. From this point all traffic uses the §2.3 AEAD envelope with the per-peer subkey derived below.
+4. The synthetic `connect` event (host-side approval prompt) only fires after this exchange completes — `host.lua` never sees an unauthenticated peer.
+
+#### 2.4.2 Subkey derivation (HKDF-SHA256, RFC 5869)
+
+```
+PRK    = HMAC-SHA256(salt = PSK, IKM = X25519(my_priv, peer_pub))
+subkey = HKDF-Expand(PRK, info = "ls-v4-subkey|" || peer_id_be4, L = 32 bytes)
+```
+
+- `peer_id_be4` is the host-assigned peer_id encoded as a 4-byte big-endian integer.
+- Both sides feed identical inputs (PSK, shared, peer_id) and arrive at the same 32-byte subkey without ever transmitting it.
+- Different peers in the same session derive **different** subkeys because `peer_id_be4` differs. A kicked guest cannot decrypt traffic destined for any other peer, even if they recorded it.
+
+#### 2.4.3 OpenSSL availability
+
+X25519 requires OpenSSL ≥ 1.1.1 (released 2018). If the runtime can load `libcrypto` but lacks X25519 (`crypto.x25519_available == false`), the host disables encryption entirely and prints a warning rather than silently downgrading to master-key encryption. Stage 4 adds forward secrecy as a defining v4 property; users on older OpenSSL must either upgrade or accept a plaintext session.
+
+#### 2.4.4 Plaintext sessions
+
+If no PSK is present (the share URL omits `#key=`, or OpenSSL is unavailable), neither side runs the §2.4 handshake. The connection skips straight from TCP/WS detection to the synthetic `connect` event and all traffic is JSON in the clear. This is unchanged from earlier protocol versions.
+
 ---
 
 ## 3. Synchronization Strategy
@@ -228,7 +269,7 @@ The `hello` message carries a `protocol_version` integer field. From v4 onward c
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 | 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
-| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3). Future Stage 4–6 changes (X25519 forward secrecy, audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
+| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3); X25519 forward-secrecy handshake (`dh_offer`/`dh_accept`) with HKDF-derived per-peer subkeys (§2.4). Future Stage 5–6 changes (audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
 
 ---
 
@@ -240,6 +281,8 @@ Every message is a JSON object with a type field `t`.
 
 | Type (`t`) | Sender | Description |
 | :--- | :--- | :--- |
+| `dh_offer` | Host | *(v4, encrypted sessions only.)* Plaintext-framed. Host's ephemeral X25519 public key + PSK-HMAC. See §2.4. |
+| `dh_accept` | Guest | *(v4, encrypted sessions only.)* Plaintext-framed. Guest's ephemeral X25519 public key + PSK-HMAC. |
 | `connect` | Guest | Initial request to join. |
 | `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, `required_caps`, and `optional_caps`. |
 | `rejected` | Host | Sent instead of `hello` when the connection is denied. |

@@ -41,6 +41,28 @@ pcall(
   int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, void *impl);
   int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *d, size_t cnt);
   int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *s);
+
+  // X25519 (OpenSSL 1.1.1+) — used for ephemeral ECDH at session start.
+  typedef struct evp_pkey_st     EVP_PKEY;
+  typedef struct evp_pkey_ctx_st EVP_PKEY_CTX;
+  EVP_PKEY_CTX *EVP_PKEY_CTX_new_id(int id, void *e);
+  void          EVP_PKEY_CTX_free(EVP_PKEY_CTX *ctx);
+  int EVP_PKEY_keygen_init(EVP_PKEY_CTX *ctx);
+  int EVP_PKEY_keygen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey);
+  int EVP_PKEY_get_raw_public_key(const EVP_PKEY *pkey, unsigned char *pub, size_t *len);
+  int EVP_PKEY_get_raw_private_key(const EVP_PKEY *pkey, unsigned char *priv, size_t *len);
+  EVP_PKEY *EVP_PKEY_new_raw_public_key(int type, void *e, const unsigned char *key, size_t keylen);
+  EVP_PKEY *EVP_PKEY_new_raw_private_key(int type, void *e, const unsigned char *key, size_t keylen);
+  void EVP_PKEY_free(EVP_PKEY *pkey);
+  EVP_PKEY_CTX *EVP_PKEY_CTX_new(EVP_PKEY *pkey, void *e);
+  int EVP_PKEY_derive_init(EVP_PKEY_CTX *ctx);
+  int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer);
+  int EVP_PKEY_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
+
+  // HMAC (single-shot API, sufficient for HKDF and the dh_offer/dh_accept tag).
+  unsigned char *HMAC(const EVP_MD *evp_md, const void *key, int key_len,
+                      const unsigned char *d, size_t n,
+                      unsigned char *md, unsigned int *md_len);
 ]]
 )
 
@@ -164,6 +186,159 @@ function M.decrypt(ciphertext_with_tag, key, nonce, aad)
     return nil
   end
   return ffi.string(out, pt_len + outl[0])
+end
+
+-- ── X25519 ECDH (OpenSSL 1.1.1+) ─────────────────────────────────────────────
+--
+-- Used by the v4 forward-secrecy handshake (`dh_offer`/`dh_accept`).  Each
+-- peer pair generates a fresh ephemeral keypair at session start and derives
+-- a shared 32-byte secret that is then fed into HKDF to produce a per-peer
+-- AES-GCM subkey.  The URL-fragment master key never encrypts traffic
+-- directly — it only acts as a PSK that authenticates the public keys via
+-- HMAC, so a future compromise of the master key cannot decrypt recorded
+-- ciphertext.
+
+local NID_X25519 = 1034 -- OpenSSL constant; stable across 1.1.1+.
+
+-- Returns priv (32 bytes), pub (32 bytes), or nil + error string.
+function M.x25519_keypair()
+  if not M.available then
+    return nil, "openssl unavailable"
+  end
+  local pctx = lib.EVP_PKEY_CTX_new_id(NID_X25519, nil)
+  if pctx == nil then
+    return nil, "EVP_PKEY_CTX_new_id failed"
+  end
+  if lib.EVP_PKEY_keygen_init(pctx) ~= 1 then
+    lib.EVP_PKEY_CTX_free(pctx)
+    return nil, "EVP_PKEY_keygen_init failed"
+  end
+  local pkey_pp = ffi.new("EVP_PKEY*[1]")
+  if lib.EVP_PKEY_keygen(pctx, pkey_pp) ~= 1 then
+    lib.EVP_PKEY_CTX_free(pctx)
+    return nil, "EVP_PKEY_keygen failed"
+  end
+  lib.EVP_PKEY_CTX_free(pctx)
+  local pkey = pkey_pp[0]
+
+  local priv_buf = ffi.new("unsigned char[?]", 32)
+  local pub_buf = ffi.new("unsigned char[?]", 32)
+  local len = ffi.new("size_t[1]", 32)
+  local ok_priv = lib.EVP_PKEY_get_raw_private_key(pkey, priv_buf, len) == 1
+  len[0] = 32
+  local ok_pub = lib.EVP_PKEY_get_raw_public_key(pkey, pub_buf, len) == 1
+  lib.EVP_PKEY_free(pkey)
+  if not ok_priv or not ok_pub then
+    return nil, "EVP_PKEY_get_raw_*_key failed"
+  end
+  return ffi.string(priv_buf, 32), ffi.string(pub_buf, 32)
+end
+
+-- Returns 32-byte shared secret, or nil + error string.
+function M.x25519_shared(priv_bytes, peer_pub_bytes)
+  if not M.available then
+    return nil, "openssl unavailable"
+  end
+  if not priv_bytes or #priv_bytes ~= 32 or not peer_pub_bytes or #peer_pub_bytes ~= 32 then
+    return nil, "expected 32-byte priv and pub"
+  end
+  local priv_pkey = lib.EVP_PKEY_new_raw_private_key(NID_X25519, nil, priv_bytes, 32)
+  if priv_pkey == nil then
+    return nil, "EVP_PKEY_new_raw_private_key failed"
+  end
+  local peer_pkey = lib.EVP_PKEY_new_raw_public_key(NID_X25519, nil, peer_pub_bytes, 32)
+  if peer_pkey == nil then
+    lib.EVP_PKEY_free(priv_pkey)
+    return nil, "EVP_PKEY_new_raw_public_key failed"
+  end
+  local pctx = lib.EVP_PKEY_CTX_new(priv_pkey, nil)
+  if pctx == nil then
+    lib.EVP_PKEY_free(priv_pkey)
+    lib.EVP_PKEY_free(peer_pkey)
+    return nil, "EVP_PKEY_CTX_new failed"
+  end
+  if lib.EVP_PKEY_derive_init(pctx) ~= 1 or lib.EVP_PKEY_derive_set_peer(pctx, peer_pkey) ~= 1 then
+    lib.EVP_PKEY_CTX_free(pctx)
+    lib.EVP_PKEY_free(priv_pkey)
+    lib.EVP_PKEY_free(peer_pkey)
+    return nil, "derive setup failed"
+  end
+  local out = ffi.new("unsigned char[?]", 32)
+  local outlen = ffi.new("size_t[1]", 32)
+  local ok = lib.EVP_PKEY_derive(pctx, out, outlen) == 1
+  lib.EVP_PKEY_CTX_free(pctx)
+  lib.EVP_PKEY_free(priv_pkey)
+  lib.EVP_PKEY_free(peer_pkey)
+  if not ok then
+    return nil, "EVP_PKEY_derive failed"
+  end
+  return ffi.string(out, tonumber(outlen[0]))
+end
+
+-- Probe X25519 availability once at module load — older OpenSSL builds
+-- (< 1.1.1) lack the EVP_PKEY raw-key API.  Sessions falling back to
+-- master-key encryption when this is false are flagged in host.lua.
+M.x25519_available = (function()
+  if not M.available then
+    return false
+  end
+  local priv, _ = M.x25519_keypair()
+  return priv ~= nil
+end)()
+
+-- ── HMAC-SHA256 ──────────────────────────────────────────────────────────────
+
+function M.hmac_sha256(key, data)
+  if not M.available then
+    return nil
+  end
+  local out = ffi.new("unsigned char[32]")
+  local outlen = ffi.new("unsigned int[1]", 32)
+  local r = lib.HMAC(lib.EVP_sha256(), key, #key, data, #data, out, outlen)
+  if r == nil then
+    return nil
+  end
+  return ffi.string(out, 32)
+end
+
+-- ── HKDF-SHA256 (RFC 5869) ───────────────────────────────────────────────────
+--
+-- Implemented in terms of HMAC-SHA256 rather than EVP_KDF to keep the
+-- function surface small and to avoid the OpenSSL 3.x EVP_KDF API split.
+-- For 32-byte output (our only use case) the expand step needs a single
+-- HMAC iteration.
+
+local function hkdf_extract(salt, ikm)
+  return M.hmac_sha256(salt, ikm)
+end
+
+local function hkdf_expand(prk, info, length)
+  local out = {}
+  local t = ""
+  local i = 1
+  while #table.concat(out) < length do
+    t = M.hmac_sha256(prk, t .. (info or "") .. string.char(i))
+    if not t then
+      return nil
+    end
+    out[#out + 1] = t
+    i = i + 1
+  end
+  return table.concat(out):sub(1, length)
+end
+
+function M.hkdf_sha256(ikm, salt, info, length)
+  if not M.available or not ikm then
+    return nil
+  end
+  if not salt or #salt == 0 then
+    salt = string.rep("\0", 32)
+  end
+  local prk = hkdf_extract(salt, ikm)
+  if not prk then
+    return nil
+  end
+  return hkdf_expand(prk, info, length or 32)
 end
 
 -- SHA-256.  Returns a 32-byte binary digest (or nil if OpenSSL is unavailable).

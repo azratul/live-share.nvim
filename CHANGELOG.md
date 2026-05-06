@@ -18,6 +18,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stages land and `develop` is merged to Nightly.
 
 ### Security
+- **Forward secrecy via X25519 ECDH (stage 4 of v4 migration; extends v4 in place)**
+  — the URL-fragment master key (the PSK) no longer encrypts traffic
+  directly.  Each peer pair runs an ephemeral X25519 handshake at session
+  start; the AES-GCM subkey is derived from the DH shared secret via HKDF.
+  - **Wire** — two new plaintext messages added: `dh_offer` (Host →
+    Guest, immediately after TCP/WS detection) and `dh_accept` (Guest →
+    Host, in reply).  Each carries a fresh ephemeral X25519 public key
+    and an `HMAC-SHA256(PSK, pub)` tag.  An MITM rewriting the URL
+    fragment (or a guest who decoded the wrong fragment) fails the
+    HMAC check and is dropped before any application traffic.  The
+    synthetic `connect` event in `host.lua` only fires *after* the
+    handshake completes — host approval prompts always run against an
+    authenticated channel.  See `PROTOCOL.md` §2.4 for the full
+    description.
+  - **Subkey** — `HKDF-SHA256(IKM = X25519(priv, peer_pub),
+    salt = PSK, info = "ls-v4-subkey|" || peer_id_be4, L = 32)`.  Each
+    peer in a multi-guest session has a unique subkey because of the
+    peer_id binding in the HKDF info string; a kicked guest cannot
+    decrypt other peers' broadcast traffic even if they recorded it.
+    Server-side `M.broadcast` therefore re-encrypts per peer (was
+    encrypt-once-frame-per-mode) — extra cost is negligible relative
+    to the JSON encode itself.
+  - **Crypto module** — `crypto.lua` gains `x25519_keypair`,
+    `x25519_shared`, `hmac_sha256`, `hkdf_sha256`.  X25519 requires
+    OpenSSL ≥ 1.1.1; `crypto.x25519_available` exposes the result of
+    a one-time probe at module load.
+  - **Fallback** — if OpenSSL is unavailable *or* lacks X25519,
+    `host.lua` disables encryption entirely (plaintext session, with
+    a clear warning).  Forward secrecy is now a defining property of
+    a v4 encrypted session; we do not silently downgrade to master-key
+    encryption, since a user upgrading to v4 expects forward secrecy.
+  - **Backward compatibility** — none.  v3 clients did not run a DH
+    handshake; on v4 they would hang waiting for `hello` while the
+    host waits for `dh_accept`.
+  Tests: `tests/integration/stage4_spec.lua` (X25519 ECDH symmetry,
+  HMAC/HKDF determinism, per-peer subkey isolation, full DH session in
+  TCP and WS modes, mis-authenticated dh_accept rejected before
+  `connect`).
+
 - **AEAD framing upgrade (stage 3 of v4 migration; extends v4 in place)**
   — replaces the v3 random 12-byte nonce with a deterministic counter nonce
   and binds each ciphertext to its sender via Additional Authenticated Data:

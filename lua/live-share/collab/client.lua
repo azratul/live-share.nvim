@@ -12,6 +12,7 @@ local M = {}
 
 local protocol = require("live-share.collab.protocol")
 local session = require("live-share.session")
+local crypto = require("live-share.collab.crypto")
 local tcp_trans = require("live-share.collab.transport.tcp")
 local ws_trans = require("live-share.collab.transport.ws")
 local log = require("live-share.collab.log")
@@ -23,15 +24,25 @@ local session_key = nil
 local send_frame = nil -- fn(payload) → framed bytes; set at connect time
 local last_seen_ms = nil
 local idle_timer = nil
--- v4 AEAD: encryptor's from_peer is the guest's own peer_id (assigned by the
--- host in `hello`).  Resolved per-encode via the lambda below so the
--- encryptor can be built before `hello` arrives — outbound traffic before
--- that point would use 0 as a fallback, but in practice the guest doesn't
--- send anything until after `hello_ack`, by which point session.peer_id is
--- set.  Decryptor is stateless and used for every inbound frame; from_peer
--- is always 0 (the host) on the guest side.
+-- v4 forward secrecy (stage 4): encryptor/decryptor are initialised in
+-- plaintext mode at connect time and swapped to AEAD with a per-peer subkey
+-- once the dh_offer/dh_accept exchange completes.  In a plaintext session
+-- (no URL key) the codec stays in plaintext mode for the whole session.
+--
+-- dh_state values:
+--   nil               — plaintext session, no DH expected
+--   "awaiting_offer"  — encrypted session, waiting for the host's dh_offer
+--   "established"     — DH done, codec uses the per-peer subkey
 local encryptor = nil
 local decryptor = nil
+local dh_state = nil
+
+-- Must match the server-side label.
+local SUBKEY_INFO_PREFIX = "ls-v4-subkey|"
+
+local function u32_be(n)
+  return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
+end
 
 -- Must match the server-side ceiling defined in server.lua.  Frames declared
 -- larger than this are dropped at the transport reader and treated as fatal.
@@ -99,25 +110,102 @@ local function send_raw(msg)
   end
 end
 
+-- Verify the host's dh_offer with the URL-fragment PSK, derive a fresh
+-- ephemeral X25519 keypair on the guest side, compute the shared secret +
+-- HKDF subkey, send dh_accept plaintext, and swap the encryptor/decryptor
+-- to AEAD with the subkey.  After this returns true, all subsequent traffic
+-- in either direction is encrypted with the per-peer subkey.
+local function handle_dh_offer(msg)
+  if msg.t ~= "dh_offer" or type(msg.pub) ~= "string" or type(msg.hmac) ~= "string" then
+    return false, "expected dh_offer"
+  end
+  local their_pub = crypto.b64url_decode(msg.pub)
+  local their_hmac = crypto.b64url_decode(msg.hmac)
+  if #their_pub ~= 32 or #their_hmac ~= 32 then
+    return false, "malformed dh_offer"
+  end
+  local expected = crypto.hmac_sha256(session_key, their_pub)
+  if not expected or expected ~= their_hmac then
+    return false, "dh_offer HMAC mismatch (PSK wrong or MITM)"
+  end
+  local my_priv, my_pub = crypto.x25519_keypair()
+  if not my_priv or not my_pub then
+    return false, "X25519 keygen failed"
+  end
+  local shared, derr = crypto.x25519_shared(my_priv, their_pub)
+  if not shared then
+    return false, "X25519 derive failed: " .. tostring(derr)
+  end
+  -- peer_id was assigned by the host and is in the dh_offer; both sides
+  -- feed it into HKDF info so the subkey is unique per peer pair.
+  local peer_id = type(msg.peer_id) == "number" and msg.peer_id or 0
+  local subkey = crypto.hkdf_sha256(shared, session_key, SUBKEY_INFO_PREFIX .. u32_be(peer_id), 32)
+  if not subkey then
+    return false, "HKDF failed"
+  end
+
+  -- Send dh_accept BEFORE swapping the codec, since dh_accept is plaintext.
+  local hmac = crypto.hmac_sha256(session_key, my_pub)
+  local accept_payload = vim.json.encode({
+    t = "dh_accept",
+    pub = crypto.b64url_encode(my_pub),
+    hmac = crypto.b64url_encode(hmac),
+  })
+  conn:write(send_frame(accept_payload))
+
+  -- Swap codecs to AEAD with the subkey.  Encryptor's from_peer is the
+  -- guest's own peer_id (assigned by the host in dh_offer / hello).
+  encryptor = protocol.new_encryptor(subkey, function()
+    return session.peer_id or peer_id
+  end)
+  decryptor = protocol.new_decryptor(subkey)
+  dh_state = "established"
+  -- The peer_id arrived in dh_offer too; record it so any subsequent
+  -- pre-hello outbound (none today, but defensive) can find it.
+  session.peer_id = peer_id
+  dbg("DH established with peer_id=" .. peer_id .. ", codec switched to subkey")
+  return true
+end
+
 local function dispatch_payloads(payloads)
   if #payloads > 0 then
     last_seen_ms = uv.now()
   end
   for _, payload in ipairs(payloads) do
-    -- Inbound from_peer is always 0 (the host) on the guest side; AAD binds
-    -- the ciphertext to that identity.
-    local msg = decryptor and decryptor:decode(payload, 0) or nil
-    if msg then
-      dbg("msg '" .. tostring(msg.t) .. "' received")
-      -- Heartbeat: handled at this layer, never bubbled up.  A ping triggers
-      -- a matching pong; a pong is silently absorbed (last_seen above is the
-      -- only side effect we need).
-      if msg.t == "ping" then
-        send_raw({ t = "pong", ts = msg.ts })
-      elseif msg.t == "pong" then
-        -- nothing else to do; last_seen already bumped above.
-      elseif on_message then
-        on_message(msg)
+    if dh_state == "awaiting_offer" then
+      -- Pre-DH inbound is plaintext JSON; parse and run the handshake.
+      local ok, parsed = pcall(vim.json.decode, payload)
+      if not ok or type(parsed) ~= "table" then
+        vim.schedule(function()
+          vim.api.nvim_err_writeln("live-share: malformed pre-DH payload from host — disconnecting")
+        end)
+        close_conn()
+        return
+      end
+      local done, err = handle_dh_offer(parsed)
+      if not done then
+        vim.schedule(function()
+          vim.api.nvim_err_writeln("live-share: " .. (err or "DH handshake failed") .. " — disconnecting")
+        end)
+        close_conn()
+        return
+      end
+    else
+      -- Inbound from_peer is always 0 (the host) on the guest side; AAD binds
+      -- the ciphertext to that identity.
+      local msg = decryptor and decryptor:decode(payload, 0) or nil
+      if msg then
+        dbg("msg '" .. tostring(msg.t) .. "' received")
+        -- Heartbeat: handled at this layer, never bubbled up.  A ping triggers
+        -- a matching pong; a pong is silently absorbed (last_seen above is the
+        -- only side effect we need).
+        if msg.t == "ping" then
+          send_raw({ t = "pong", ts = msg.ts })
+        elseif msg.t == "pong" then
+          -- nothing else to do; last_seen already bumped above.
+        elseif on_message then
+          on_message(msg)
+        end
       end
     end
   end
@@ -277,14 +365,14 @@ function M.connect(host, port, key, mode, attempt, on_error)
   attempt = attempt or 0
   mode = mode or "ws"
   session_key = key
-  -- v4 AEAD setup: encryptor's salt is generated here (per session); the
-  -- counter starts at 1 on the first outbound encode.  from_peer is read
-  -- from session.peer_id at encode time — falls back to 0 in the unlikely
-  -- case the guest sends something before `hello` arrives.
-  encryptor = protocol.new_encryptor(key, function()
-    return session.peer_id or 0
-  end)
-  decryptor = protocol.new_decryptor(key)
+  -- v4 forward secrecy (stage 4): start in plaintext mode.  If the session
+  -- has a key, dh_state = "awaiting_offer" — the encryptor/decryptor will
+  -- be replaced with AEAD-with-subkey once the dh_offer/dh_accept handshake
+  -- completes inside dispatch_payloads.  Until then the only thing flowing
+  -- is the plaintext DH handshake itself.
+  encryptor = protocol.new_encryptor(nil, nil)
+  decryptor = protocol.new_decryptor(nil)
+  dh_state = key and "awaiting_offer" or nil
 
   dbg("resolving " .. host)
   uv.getaddrinfo(host, nil, { socktype = "stream" }, function(err, res)
@@ -328,6 +416,7 @@ function M.stop()
   last_seen_ms = nil
   encryptor = nil
   decryptor = nil
+  dh_state = nil
 end
 
 return M

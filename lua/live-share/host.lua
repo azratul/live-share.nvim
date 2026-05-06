@@ -476,8 +476,19 @@ function M.start(port)
     { workspace = vim.fn.fnamemodify(root, ":t"), transport = (config and config.transport) or "ws" }
   )
 
-  if crypto.available then
+  if crypto.available and crypto.x25519_available then
+    -- Full v4: AES-GCM with per-peer subkeys derived via X25519 + HKDF.
     session.key = crypto.generate_key()
+  elseif crypto.available then
+    -- AES-GCM exists but X25519 (OpenSSL ≥ 1.1.1) does not.  Stage 4
+    -- requires X25519 for forward secrecy, so fall back to plaintext rather
+    -- than silently downgrading to master-key encryption — the user can
+    -- upgrade OpenSSL to recover encryption.
+    session.key = nil
+    vim.notify(
+      "live-share: OpenSSL too old for X25519 (need ≥ 1.1.1) — session runs WITHOUT encryption",
+      vim.log.levels.WARN
+    )
   else
     session.key = nil
     vim.notify("live-share: OpenSSL not found — session runs WITHOUT encryption", vim.log.levels.WARN)
