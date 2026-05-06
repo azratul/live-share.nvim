@@ -146,7 +146,8 @@ The protocol uses **AES-256-GCM** for end-to-end encryption. The encryption key 
 - The key is a 32-byte (256-bit) random string, Base64Url encoded in the connection URL.
 - Clients must decode the Base64Url string to get the raw 32-byte key.
 
-### 2.2 Payload Structure
+### 2.2 Payload Structure (v3)
+
 If a key is present, the binary payload (after the TCP length prefix or inside the WS frame) is structured as follows:
 
 1.  **Nonce (IV):** 12 random bytes.
@@ -154,6 +155,23 @@ If a key is present, the binary payload (after the TCP length prefix or inside t
 3.  **Authentication Tag:** 16 bytes (appended to the ciphertext).
 
 *Note: If no key is provided, the payload is simply the UTF-8 encoded JSON string.*
+
+### 2.3 Payload Structure (v4)
+
+v4 keeps the same total envelope size but replaces the random nonce with a deterministic counter and binds each ciphertext to its sender via Additional Authenticated Data (AAD).
+
+```
+[ 4-byte salt ][ 8-byte counter (BE) ][ ciphertext ][ 16-byte GCM tag ]
+└──────── 12-byte AES-GCM nonce ────────┘
+```
+
+- **salt** — 4 random bytes generated per *direction* when the encryptor is constructed and reused for the lifetime of the session. Two encryptors built from the same key (e.g., the host and a guest) emit different salts, so their nonce streams cannot collide.
+- **counter** — 8-byte big-endian unsigned integer, starts at 1 on the first outbound message and increments by 1 per encode. Combined with the salt this guarantees nonce uniqueness without relying on the birthday bound of a 12-byte random nonce.
+- **AAD** (bound into the GCM tag, not transmitted in the clear): `[ 8-byte counter (BE) ][ 4-byte from_peer (BE) ]`. The receiver recomputes the AAD from (a) the counter parsed from the wire nonce and (b) the connection's authoritative peer_id (host = 0 from the guest's perspective; the connection's peer_id from the host's perspective). Any swap of recipient or relabelling of sender fails GCM verification.
+
+The wire format is incompatible with v3 at the cryptographic layer: a v3 receiver would treat the payload as a random-nonce envelope and fail the GCM tag because of the missing AAD. This is what backs the strict version check in v4 — peers running mismatched majors cannot interop even if the handshake fields are syntactically compatible.
+
+**Punch transport exception.** When `transport = "punch"` is in use, channel-level AES-GCM is provided by the `punch` library and the §2.3 envelope is *not* applied. Payloads on the wire are plain JSON. See §1.3.3.
 
 ---
 
@@ -210,7 +228,7 @@ The `hello` message carries a `protocol_version` integer field. From v4 onward c
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 | 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
-| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill). Future Stage 3–6 changes (AEAD AAD, X25519 forward secrecy, audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
+| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3). Future Stage 4–6 changes (X25519 forward secrecy, audit hash chain, chunked workspace info) will land under the same v4 number before merge to Nightly. |
 
 ---
 

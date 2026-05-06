@@ -11,6 +11,7 @@
 local M = {}
 
 local protocol = require("live-share.collab.protocol")
+local session = require("live-share.session")
 local tcp_trans = require("live-share.collab.transport.tcp")
 local ws_trans = require("live-share.collab.transport.ws")
 local log = require("live-share.collab.log")
@@ -22,6 +23,15 @@ local session_key = nil
 local send_frame = nil -- fn(payload) → framed bytes; set at connect time
 local last_seen_ms = nil
 local idle_timer = nil
+-- v4 AEAD: encryptor's from_peer is the guest's own peer_id (assigned by the
+-- host in `hello`).  Resolved per-encode via the lambda below so the
+-- encryptor can be built before `hello` arrives — outbound traffic before
+-- that point would use 0 as a fallback, but in practice the guest doesn't
+-- send anything until after `hello_ack`, by which point session.peer_id is
+-- set.  Decryptor is stateless and used for every inbound frame; from_peer
+-- is always 0 (the host) on the guest side.
+local encryptor = nil
+local decryptor = nil
 
 -- Must match the server-side ceiling defined in server.lua.  Frames declared
 -- larger than this are dropped at the transport reader and treated as fatal.
@@ -78,11 +88,11 @@ local function start_idle_timer()
 end
 
 local function send_raw(msg)
-  if not (conn and not conn:is_closing()) or not send_frame then
+  if not (conn and not conn:is_closing()) or not send_frame or not encryptor then
     return
   end
   local ok, frame = pcall(function()
-    return send_frame(protocol.encode(msg, session_key))
+    return send_frame(encryptor:encode(msg))
   end)
   if ok and frame then
     conn:write(frame)
@@ -94,7 +104,9 @@ local function dispatch_payloads(payloads)
     last_seen_ms = uv.now()
   end
   for _, payload in ipairs(payloads) do
-    local msg = protocol.decode(payload, session_key)
+    -- Inbound from_peer is always 0 (the host) on the guest side; AAD binds
+    -- the ciphertext to that identity.
+    local msg = decryptor and decryptor:decode(payload, 0) or nil
     if msg then
       dbg("msg '" .. tostring(msg.t) .. "' received")
       -- Heartbeat: handled at this layer, never bubbled up.  A ping triggers
@@ -265,6 +277,14 @@ function M.connect(host, port, key, mode, attempt, on_error)
   attempt = attempt or 0
   mode = mode or "ws"
   session_key = key
+  -- v4 AEAD setup: encryptor's salt is generated here (per session); the
+  -- counter starts at 1 on the first outbound encode.  from_peer is read
+  -- from session.peer_id at encode time — falls back to 0 in the unlikely
+  -- case the guest sends something before `hello` arrives.
+  encryptor = protocol.new_encryptor(key, function()
+    return session.peer_id or 0
+  end)
+  decryptor = protocol.new_decryptor(key)
 
   dbg("resolving " .. host)
   uv.getaddrinfo(host, nil, { socktype = "stream" }, function(err, res)
@@ -286,12 +306,12 @@ function M.send(msg)
   if not (conn and not conn:is_closing()) then
     return
   end
-  if not send_frame then
+  if not send_frame or not encryptor then
     return
   end
 
   local ok, result = pcall(function()
-    return send_frame(protocol.encode(msg, session_key))
+    return send_frame(encryptor:encode(msg))
   end)
   if ok then
     conn:write(result)
@@ -306,6 +326,8 @@ function M.stop()
   close_conn()
   session_key = nil
   last_seen_ms = nil
+  encryptor = nil
+  decryptor = nil
 end
 
 return M

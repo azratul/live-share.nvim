@@ -32,6 +32,11 @@ local heartbeat_timer = nil
 local next_peer = 1
 local on_message = nil
 local session_key = nil
+-- v4 AEAD: one outbound encryptor for the host (from_peer always = 0) and one
+-- decryptor used for every inbound connection (from_peer is the connection's
+-- authoritative peer_id, supplied per-call).
+local encryptor = nil
+local decryptor = nil
 
 -- Maximum bytes per protocol frame.  Frames declaring a length above this are
 -- dropped at the transport reader before any allocation, and the connection
@@ -129,7 +134,7 @@ local function start_heartbeat()
           close_peer(pid, "idle timeout")
         elseif not c.handle:is_closing() then
           local ok, frame = pcall(function()
-            return c.framer(protocol.encode({ t = "ping", ts = now }, session_key))
+            return c.framer(encryptor:encode({ t = "ping", ts = now }))
           end)
           if ok and frame then
             c.handle:write(frame)
@@ -150,6 +155,11 @@ end
 
 function M.start(ip, port, key)
   session_key = key
+  -- Host's outbound peer_id is always 0; the lambda is purely formal.
+  encryptor = protocol.new_encryptor(key, function()
+    return 0
+  end)
+  decryptor = protocol.new_decryptor(key)
   srv = uv.new_tcp()
   local ok, err = srv:bind(ip, port)
   if not ok then
@@ -263,7 +273,10 @@ function M.start(ip, port, key)
         last_seen[peer_id] = uv.now()
       end
       for _, payload in ipairs(payloads) do
-        local msg = protocol.decode(payload, session_key)
+        -- AAD on inbound binds the message to the connection's authoritative
+        -- peer_id; an attacker swapping the ciphertext between connections
+        -- (or relabelling a recorded message) would fail GCM verification.
+        local msg = decryptor:decode(payload, peer_id)
         if msg then
           dispatch(msg)
         end
@@ -424,7 +437,7 @@ function M.reject(peer_id, msg)
     p.pending_timer = nil
   end
   local ok, frame = pcall(function()
-    return p.framer(protocol.encode(msg, session_key))
+    return p.framer(encryptor:encode(msg))
   end)
   if ok and frame then
     p.handle:write(frame)
@@ -456,7 +469,7 @@ function M.send(peer_id, msg)
   end
   dbg("sending '" .. tostring(msg.t) .. "' to peer " .. peer_id)
   local ok, result = pcall(function()
-    return c.framer(protocol.encode(msg, session_key))
+    return c.framer(encryptor:encode(msg))
   end)
   if ok and result then
     c.handle:write(result)
@@ -466,7 +479,8 @@ function M.send(peer_id, msg)
 end
 
 function M.broadcast(msg, except_peer)
-  -- Encode payload once; frame once per transport type.
+  -- Encode payload once; frame once per transport type.  All recipients see
+  -- the same nonce + AAD because from_peer is always 0 (host) on outbound.
   local payload = nil
   local framed = {} -- mode tag → framed bytes
   for pid, c in pairs(clients) do
@@ -475,7 +489,7 @@ function M.broadcast(msg, except_peer)
     end
 
     if not payload then
-      payload = protocol.encode(msg, session_key)
+      payload = encryptor:encode(msg)
     end
     if not framed[c.mode] then
       framed[c.mode] = c.framer(payload)
@@ -552,6 +566,8 @@ function M.stop()
   last_seen = {}
   next_peer = 1
   session_key = nil
+  encryptor = nil
+  decryptor = nil
   if srv and not srv:is_closing() then
     srv:close()
     srv = nil

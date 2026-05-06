@@ -18,6 +18,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stages land and `develop` is merged to Nightly.
 
 ### Security
+- **AEAD framing upgrade (stage 3 of v4 migration; extends v4 in place)**
+  — replaces the v3 random 12-byte nonce with a deterministic counter nonce
+  and binds each ciphertext to its sender via Additional Authenticated Data:
+  - **Wire envelope** (same total length as v3): `[4-byte salt][8-byte
+    counter BE][ciphertext][16-byte GCM tag]`.  Salt is generated per
+    direction at session start; counter starts at 1 and increments per
+    encode.  See `PROTOCOL.md` §2.3 for the full description.
+  - **AAD** = `[8-byte counter BE][4-byte from_peer BE]`.  Receiver
+    recomputes the AAD using the counter parsed from the nonce and the
+    connection's authoritative peer_id; any swap of recipient or
+    relabelling of sender fails GCM verification.
+  - **Implementation** — `crypto.encrypt`/`crypto.decrypt` now accept an
+    optional `aad` argument; `protocol.lua` exposes `new_encryptor(key,
+    from_peer_fn)` and `new_decryptor(key)` for the v4 path.  `server.lua`
+    and `client.lua` instantiate one of each at session start and route
+    every send/recv through them.  The static `protocol.encode/decode`
+    functions are kept as a v3-compatible plaintext fallback (used by
+    tests and the punch transport, where channel-level encryption is
+    provided by the `punch` library).
+  - **Backward compatibility** — none.  v3 receivers fail GCM tag
+    verification on a v4 payload (no AAD) and vice versa, on top of the
+    strict version check from stage 2.
+  Tests: `tests/integration/stage3_spec.lua` (deterministic nonce,
+  round-trip, AAD-mismatch rejection, distinct salts per encryptor,
+  plaintext mode, v3↔v4 envelope incompatibility).
+
 - **Lifecycle hardening (stage 2 of v4 migration; introduces the v3→v4 bump)**
   — three host-side ceilings closed in one pass:
   - **Max frame size** — both `transport/tcp.lua` (length-prefix) and

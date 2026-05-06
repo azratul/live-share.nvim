@@ -102,7 +102,10 @@ function M.generate_key()
 end
 
 -- Returns ciphertext .. tag.
-function M.encrypt(plaintext, key, nonce)
+-- `aad` is optional Additional Authenticated Data: not encrypted, but bound
+-- into the GCM tag so any tampering is detected on decrypt.  Pass nil for
+-- v3-compatible behaviour (no AAD).
+function M.encrypt(plaintext, key, nonce, aad)
   if not M.available then
     return plaintext
   end
@@ -114,6 +117,10 @@ function M.encrypt(plaintext, key, nonce)
   lib.EVP_EncryptInit_ex(ctx, lib.EVP_aes_256_gcm(), nil, nil, nil)
   lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, NONCE_LEN, nil)
   lib.EVP_EncryptInit_ex(ctx, nil, nil, key, nonce)
+  if aad and #aad > 0 then
+    -- AAD must be fed before the plaintext; pass NULL output buffer.
+    lib.EVP_EncryptUpdate(ctx, nil, outl, aad, #aad)
+  end
   lib.EVP_EncryptUpdate(ctx, out, outl, plaintext, #plaintext)
   local ct_len = outl[0]
   lib.EVP_EncryptFinal_ex(ctx, out + ct_len, outl)
@@ -124,8 +131,9 @@ function M.encrypt(plaintext, key, nonce)
   return ffi.string(out, ct_len) .. ffi.string(tag, TAG_LEN)
 end
 
--- Returns plaintext, or nil if authentication fails.
-function M.decrypt(ciphertext_with_tag, key, nonce)
+-- Returns plaintext, or nil if authentication fails (wrong key, tampered
+-- ciphertext, or AAD mismatch — the GCM tag verifies all three together).
+function M.decrypt(ciphertext_with_tag, key, nonce, aad)
   if not M.available then
     return ciphertext_with_tag
   end
@@ -143,6 +151,9 @@ function M.decrypt(ciphertext_with_tag, key, nonce)
   lib.EVP_DecryptInit_ex(ctx, lib.EVP_aes_256_gcm(), nil, nil, nil)
   lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, NONCE_LEN, nil)
   lib.EVP_DecryptInit_ex(ctx, nil, nil, key, nonce)
+  if aad and #aad > 0 then
+    lib.EVP_DecryptUpdate(ctx, nil, outl, aad, #aad)
+  end
   lib.EVP_DecryptUpdate(ctx, out, outl, ciphertext_with_tag, ct_len)
   local pt_len = outl[0]
   lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, tag)
