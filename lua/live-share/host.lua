@@ -21,6 +21,13 @@ local config = nil
 local conn = nil
 local seq = 0
 
+-- v4 stage 6: workspace listing is streamed as `workspace_info_chunk` messages
+-- of at most this many paths each, terminated by `workspace_info_done`.
+-- 1000 paths/chunk on a 50k-file monorepo yields 50 chunks of ~50 KB JSON
+-- (well under MAX_MESSAGE_BYTES = 10 MB) without making the per-chunk
+-- overhead dominate on small workspaces.
+local WORKSPACE_CHUNK_SIZE = 1000
+
 -- tracked[path] = { buf_id, applying }  — Neovim buffers currently open by host
 local tracked = {}
 local host_aug = vim.api.nvim_create_augroup("LiveShareHost", { clear = true })
@@ -253,7 +260,8 @@ local function on_message(msg, from_peer)
 
             -- Workspace file list (flat).
             local files = workspace.scan()
-            if workspace.scan_was_truncated() then
+            local truncated = workspace.scan_was_truncated()
+            if truncated then
               local n = #files
               vim.schedule(function()
                 vim.notify(
@@ -264,10 +272,44 @@ local function on_message(msg, from_peer)
                 )
               end)
             end
+
+            -- v4 stage 6: stream the file list as `workspace_info_chunk`
+            -- messages of at most WORKSPACE_CHUNK_SIZE paths each, terminated
+            -- by `workspace_info_done`.  This keeps every individual frame
+            -- well below MAX_MESSAGE_BYTES on monorepos with tens of
+            -- thousands of files, and lets the guest render its file
+            -- explorer (and accept :LiveShareOpen for already-known paths)
+            -- incrementally instead of after a multi-MB JSON decode.
+            local root_name = vim.fn.fnamemodify(workspace.get_root() or ".", ":t")
+            local total = #files
+            local chunk_size = WORKSPACE_CHUNK_SIZE
+            local idx = 1
+            local seq_n = 0
+            -- Always send at least one chunk, even for an empty workspace —
+            -- the guest's WORKSPACE_SYNC state needs a deterministic stream
+            -- to walk before `workspace_info_done`.
+            repeat
+              seq_n = seq_n + 1
+              local slice = {}
+              local upper = math.min(idx + chunk_size - 1, total)
+              for i = idx, upper do
+                slice[#slice + 1] = files[i]
+              end
+              local chunk = { t = "workspace_info_chunk", seq = seq_n, files = slice }
+              if seq_n == 1 then
+                -- root_name only travels in the first chunk; subsequent
+                -- chunks are pure file-list payload.  Saves repeating it
+                -- N times on a 50-chunk monorepo stream.
+                chunk.root_name = root_name
+              end
+              conn:send(from_peer, chunk)
+              idx = upper + 1
+            until idx > total
+
             conn:send(from_peer, {
-              t = "workspace_info",
-              root_name = vim.fn.fnamemodify(workspace.get_root() or ".", ":t"),
-              files = files,
+              t = "workspace_info_done",
+              total_files = total,
+              truncated = truncated and true or false,
             })
 
             -- Snapshot of currently connected peers so the new guest sees them immediately.

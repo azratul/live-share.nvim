@@ -16,6 +16,7 @@ local conn = nil
 local guest_role = nil -- "rw" | "ro" — set from the hello message
 local workspace_files = {} -- flat list of paths in the remote workspace
 local workspace_root_name = nil
+local ws_chunks_seen = 0 -- v4 stage 6: counts incoming workspace_info_chunk messages
 local cursor_timer = nil
 local cursor_aug = vim.api.nvim_create_augroup("LiveShareGuestCursor", { clear = true })
 
@@ -142,11 +143,16 @@ local function on_message(msg)
   -- "active".  Previously these were silently dropped, which on a large
   -- workspace caused `:LiveShareOpen` issued right after approval to look
   -- like it did nothing — `file_response` arrived while the guest was still
-  -- decoding the huge `workspace_info` and was discarded.  Only init and
-  -- safety messages bypass the buffer.
+  -- decoding the huge `workspace_info` and was discarded.  v4 stage 6 split
+  -- workspace_info into chunks (`workspace_info_chunk` + `workspace_info_done`)
+  -- so each individual message is small, but the gate still matters because
+  -- the host sends peers_snapshot/open_files_snapshot AFTER the chunk stream;
+  -- a fast guest could otherwise see file_response in between.  Only init
+  -- and safety messages bypass the buffer.
   if state == "workspace_sync" then
     local init_or_safety = {
-      workspace_info = true,
+      workspace_info_chunk = true,
+      workspace_info_done = true,
       peers_snapshot = true,
       open_files_snapshot = true,
       bye = true,
@@ -261,18 +267,56 @@ local function on_message(msg)
       presence.update_peer(p.peer_id, p.name, p.active_path)
     end
 
-  -- ── workspace_info ────────────────────────────────────────────────────────
-  -- Received right after hello: the full flat file list of the remote workspace.
-  elseif msg.t == "workspace_info" then
-    workspace_files = msg.files or {}
-    workspace_root_name = msg.root_name
+  -- ── workspace_info_chunk ──────────────────────────────────────────────────
+  -- v4 stage 6: the workspace file list is streamed in chunks of up to ~1000
+  -- paths.  The first chunk (seq=1) carries `root_name`; subsequent chunks
+  -- only carry `files`.  The list is consumable progressively — :LiveShareOpen
+  -- works for any path already received without waiting for `workspace_info_done`.
+  elseif msg.t == "workspace_info_chunk" then
+    if msg.seq == 1 then
+      workspace_files = {}
+      workspace_root_name = msg.root_name
+      ws_chunks_seen = 0
+    end
+    ws_chunks_seen = (ws_chunks_seen or 0) + 1
+    -- Tolerate out-of-order seq numbers in principle (the host always sends
+    -- in order today, but we guard anyway): we just append, since the only
+    -- consumer is the file explorer and it tolerates any ordering.
+    if type(msg.files) == "table" then
+      for _, p in ipairs(msg.files) do
+        workspace_files[#workspace_files + 1] = p
+      end
+    end
+
+  -- ── workspace_info_done ───────────────────────────────────────────────────
+  -- v4 stage 6: terminator for the chunk stream.  Carries `total_files` for
+  -- a sanity check against the chunks we accumulated, and `truncated` so the
+  -- guest can warn that the listing is incomplete.
+  elseif msg.t == "workspace_info_done" then
+    local got = #workspace_files
+    local total = msg.total_files or got
+    if got ~= total then
+      vim.schedule(function()
+        vim.notify(
+          string.format(
+            "live-share: workspace listing arrived incomplete (got %d of %d files) — :LiveShareWorkspace may be missing entries",
+            got,
+            total
+          ),
+          vim.log.levels.WARN
+        )
+      end)
+    end
     vim.schedule(function()
+      local suffix = msg.truncated and " — host-side cap hit, listing is truncated" or ""
       vim.api.nvim_out_write(
         "live-share: workspace '"
           .. (workspace_root_name or "?")
           .. "' ("
-          .. #workspace_files
-          .. " files). Use :LiveShareWorkspace to explore.\n"
+          .. got
+          .. " files"
+          .. suffix
+          .. "). Use :LiveShareWorkspace to explore.\n"
       )
     end)
 
@@ -606,6 +650,7 @@ function M.stop()
   end
   workspace_files = {}
   workspace_root_name = nil
+  ws_chunks_seen = 0
   guest_role = nil
   state = "handshake"
   msg_buffer = {}

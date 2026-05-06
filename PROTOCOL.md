@@ -269,7 +269,7 @@ The `hello` message carries a `protocol_version` integer field. From v4 onward c
 | 1 | Initial versioned release. Introduces this field. |
 | 2 | Adds `caps` to `hello` / `hello_ack`; adds `error` message type; formalises `file_request` / `file_response` resync flow. |
 | 3 | Replaces flat `caps` with `required_caps` / `optional_caps`; adds `req_id` to `file_request` / `file_response` / `error`. |
-| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3); X25519 forward-secrecy handshake (`dh_offer`/`dh_accept`) with HKDF-derived per-peer subkeys (§2.4); tamper-evident host-side audit log with per-record SHA-256 chain and optional `payload_hash` correlator (§7.6, no wire change). Future Stage 6 (chunked workspace info) will land under the same v4 number before merge to Nightly. |
+| 4 *(unreleased)* | Strict version check; max-frame size (10 MB); pending-peer timeout (90 s); ping/pong heartbeat (15 s ping / 30 s idle kill); AEAD framing with deterministic counter nonce + AAD binding sender peer_id (§2.3); X25519 forward-secrecy handshake (`dh_offer`/`dh_accept`) with HKDF-derived per-peer subkeys (§2.4); tamper-evident host-side audit log with per-record SHA-256 chain and optional `payload_hash` correlator (§7.6, no wire change); workspace listing streamed as `workspace_info_chunk` + `workspace_info_done` instead of a single `workspace_info` (§5.1). All six staging steps complete; ready for merge from `develop` to Nightly. |
 
 ---
 
@@ -286,9 +286,10 @@ Every message is a JSON object with a type field `t`.
 | `connect` | Guest | Initial request to join. |
 | `hello` | Host | Response after approval. Contains `protocol_version`, `peer_id`, `role` (`rw`/`ro`), `host_name`, `required_caps`, and `optional_caps`. |
 | `rejected` | Host | Sent instead of `hello` when the connection is denied. |
-| `workspace_info` | Host | Sent after `hello`. Contains `root_name` and a flat array `files` of relative paths. |
-| `peers_snapshot` | Host | Sent after `workspace_info` if other guests are already connected. |
-| `open_files_snapshot` | Host | Sent after `workspace_info`. Full content of all currently open files. |
+| `workspace_info_chunk` | Host | *(v4.)* Sent after `hello`, repeated. Chunk of the workspace file list (≤ 1000 paths each). The first chunk (`seq=1`) carries `root_name`; subsequent chunks carry only `seq` and `files`. |
+| `workspace_info_done` | Host | *(v4.)* Terminator for the `workspace_info_chunk` stream. Carries `total_files` and `truncated`. |
+| `peers_snapshot` | Host | Sent after `workspace_info_done` if other guests are already connected. |
+| `open_files_snapshot` | Host | Sent after `workspace_info_done`. Full content of all currently open files. |
 | `hello_ack` | Guest | Final handshake step. Guest sends their `name` and `caps`. |
 
 #### `connect` (Guest → Host)
@@ -321,14 +322,35 @@ Defined capability tokens:
 | `cursor` | Optional | Cursor and visual-selection sync (`cursor` messages) |
 | `follow` | Optional | Follow-mode: host broadcasts `focus` events |
 
-#### `workspace_info` (Host → Guest)
+#### `workspace_info_chunk` (Host → Guest, repeating) *(v4)*
 ```json
 {
-  "t": "workspace_info",
+  "t": "workspace_info_chunk",
+  "seq": 1,
   "root_name": "my-project",
   "files": ["src/main.lua", "README.md", "lua/plugin/init.lua"]
 }
 ```
+
+The host streams the workspace file list as one or more `workspace_info_chunk` messages of at most ~1000 paths each, terminated by `workspace_info_done` (below).
+
+- `seq` (integer, 1-indexed) — monotonic chunk counter for this session. The host sends chunks in order; guests SHOULD nevertheless tolerate out-of-order reception (e.g. on a transport that interleaves) and rely on `total_files` from the terminator for completeness.
+- `root_name` (string) — present **only** on the chunk with `seq = 1`. Subsequent chunks carry `seq` and `files` only.
+- `files` (array of strings) — workspace-relative paths in this chunk; may be empty (the host always sends at least one chunk + a terminator, even for an empty workspace, so the guest's WORKSPACE_SYNC state machine has a deterministic stream to walk).
+
+Guests SHOULD render their file explorer progressively as chunks arrive — `:LiveShareOpen` for any path already received works without waiting for `workspace_info_done`.
+
+#### `workspace_info_done` (Host → Guest, once) *(v4)*
+```json
+{
+  "t": "workspace_info_done",
+  "total_files": 4231,
+  "truncated": false
+}
+```
+
+- `total_files` (integer) — total number of paths the host sent across all `workspace_info_chunk` messages. Guests SHOULD verify this matches the number of paths they accumulated and warn the user on mismatch.
+- `truncated` (boolean) — `true` if the host's scan hit `scan_max_files` and the listing is incomplete. Guests SHOULD surface this to the user.
 
 #### `hello_ack` (Guest → Host)
 ```json
@@ -636,7 +658,7 @@ A guest client moves through the following states after initiating a connection.
         │ caps OK → send: hello_ack
         ▼
  ┌──────────────────┐
- │ WORKSPACE_SYNC   │  Waiting for workspace_info + open_files_snapshot
+ │ WORKSPACE_SYNC   │  Receiving workspace_info_chunk… → workspace_info_done → open_files_snapshot
  └──────┬───────────┘
         │ recv: open_files_snapshot (last expected init message)
         ▼
@@ -651,8 +673,9 @@ A guest client moves through the following states after initiating a connection.
 ```
 
 **Notes on WORKSPACE_SYNC:**
-- `workspace_info`, `peers_snapshot` (optional), and `open_files_snapshot` all arrive in this window, in that order.
+- The init sequence in this window is: one or more `workspace_info_chunk`, exactly one `workspace_info_done`, optionally `peers_snapshot`, then `open_files_snapshot`. The host emits them in that order.
 - The client should buffer but not yet display any `patch` or `cursor` messages that arrive before `open_files_snapshot` is processed — apply them immediately after the snapshot is committed.
+- The client MAY render the file explorer progressively as `workspace_info_chunk` messages arrive (no need to wait for `workspace_info_done`); but it MUST stay in WORKSPACE_SYNC until `open_files_snapshot`.
 - If no `open_files_snapshot` is received within a reasonable timeout (suggested: 10 s), the client should disconnect and surface an error.
 
 **Notes on ACTIVE:**
@@ -707,7 +730,8 @@ Guest supports `workspace` and `cursor`; does not implement `follow`. Responds:
 ### 4. Host sends workspace init sequence
 
 ```json
-{ "t": "workspace_info", "root_name": "my-project", "files": ["src/hello.lua", "README.md"] }
+{ "t": "workspace_info_chunk", "seq": 1, "root_name": "my-project", "files": ["src/hello.lua", "README.md"] }
+{ "t": "workspace_info_done", "total_files": 2, "truncated": false }
 ```
 
 No other guests are connected, so `peers_snapshot` is omitted. Then:

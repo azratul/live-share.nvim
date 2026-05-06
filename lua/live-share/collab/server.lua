@@ -47,9 +47,11 @@ local SUBKEY_INFO_PREFIX = "ls-v4-subkey|"
 -- Maximum bytes per protocol frame.  Frames declaring a length above this are
 -- dropped at the transport reader before any allocation, and the connection
 -- is closed.  Defends against a malicious peer announcing huge sizes to
--- exhaust host memory.  Picked to comfortably cover today's largest
--- legitimate message (`workspace_info` for a ~50k-file monorepo, ~5 MB JSON)
--- while remaining well below the 4 GB WS frame ceiling.
+-- exhaust host memory.  Picked to comfortably cover the largest legitimate
+-- message after stage 6 (a single `workspace_info_chunk` of 1000 paths is
+-- well under 1 MB; `file_response` for the 5 MB read_file cap is the next
+-- biggest at ~6 MB after JSON-escape + nonce/tag overhead) while remaining
+-- well below the 4 GB WS frame ceiling.
 local MAX_MESSAGE_BYTES = 10 * 1024 * 1024
 
 -- Pending-peer timeout: an unapproved peer sitting in `pending` past this

@@ -1,5 +1,6 @@
 {
-  "t": "workspace_info",
+  "t": "workspace_info_chunk",
+  "seq": 1,
   "root_name": "my-project",
   "files": ["src/main.lua", "README.md", "lua/plugin/init.lua"]
 }

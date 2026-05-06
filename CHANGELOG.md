@@ -17,6 +17,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (no further bumps); the open-pair (VS Code) port is deferred until all
   stages land and `develop` is merged to Nightly.
 
+### Changed
+- **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
+  — replaces the single `workspace_info` message with a sequence of
+  `workspace_info_chunk` messages of at most 1000 paths each, terminated
+  by `workspace_info_done`.  This is the final stage of the v4 migration;
+  develop is now ready to merge to Nightly.
+  - **Wire** — two new message types added, one removed:
+    - `workspace_info_chunk { seq, files[], root_name? }` — repeating.
+      `seq` is 1-indexed and monotonic per session; `root_name` is sent
+      only on the first chunk; `files` is a workspace-relative path
+      array, may be empty.
+    - `workspace_info_done { total_files, truncated }` — terminator.
+      `total_files` lets the guest sanity-check that no chunks were lost;
+      `truncated` propagates the host-side `scan_max_files` cap.
+    - `workspace_info` is removed (it was v3); v4 hosts and guests do not
+      emit or accept it.
+  - **Why** — on a 50 k-file monorepo the old `workspace_info` was a
+    single ~5 MB JSON message that blocked the guest's WORKSPACE_SYNC
+    state for hundreds of milliseconds.  During that window
+    `:LiveShareOpen` issued right after approval looked like it did
+    nothing because `file_response` was buffered out, then dropped.
+    Streaming in 1000-path chunks keeps each individual message small
+    (well under MAX_MESSAGE_BYTES) and lets the guest render its file
+    explorer progressively — `:LiveShareOpen` works as soon as a path
+    appears, no need to wait for the whole listing.
+  - **Order** — `workspace_info_chunk`* → `workspace_info_done` →
+    `peers_snapshot` (if any) → `open_files_snapshot`.  Guest stays in
+    WORKSPACE_SYNC until `open_files_snapshot`, but MAY render the file
+    explorer as chunks arrive.  Even an empty workspace produces one
+    empty chunk + done so the state machine has a deterministic stream.
+  - **Backward compatibility** — none.  v3 guests will sit in
+    workspace_sync until the 10 s watchdog fires.  This is intentional;
+    v4 is a develop-branch wire format until the merge to Nightly.
+  See `PROTOCOL.md` §5.1 (chunked message defs) and §8 (state-machine
+  notes).  Tests: `tests/integration/stage6_spec.lua` (small + multi-chunk
+  + empty + truncated workspaces over a real DH-encrypted TCP session).
+
 ### Security
 - **Tamper-evident audit log (stage 5 of v4 migration; host-only, no wire change)**
   — every entry written to the host's audit log (`stdpath('state')/live-share-audit.log`
