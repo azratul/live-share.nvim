@@ -27,6 +27,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   base64url). Comments only — no behavioural change; improves lua-ls
   completion/diagnostics and lowers the barrier to contribution.
 
+### Internal
+- **Split the host message dispatch out of `host.lua`** — the ~290-line
+  `on_message` if/elseif chain moved verbatim into a new
+  `live-share/host/dispatch.lua` keyed by message type, leaving `host.lua`
+  focused on session lifecycle and buffer tracking (761 → 467 lines). Handlers
+  receive an explicit `LiveShare.HostContext` (the live connection, the
+  tracked-buffer table, and the seq/username accessors) instead of reaching
+  into host-module locals. No behavioural or wire change.
+
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
   — replaces the single `workspace_info` message with a sequence of
