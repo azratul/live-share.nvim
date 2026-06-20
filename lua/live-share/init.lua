@@ -1,6 +1,32 @@
 -- Entry point: merges user config with defaults and wires modules.
+
+---User-facing configuration, as passed to `require("live-share").setup(opts)`.
+---All fields are optional; unset fields fall back to the documented defaults.
+---@class LiveShare.Config
+---@field port_internal? integer local TCP port for the collab server (default 9876)
+---@field port? integer external tunnel port (default 80)
+---@field max_attempts? integer URL-polling retries before giving up (default 40)
+---@field service? string active tunnel provider (default "nokey@localhost.run")
+---@field service_url? string path of the temp file the tunnel writes its URL to; defaults to an OS temp path
+---@field ip_local? string local bind address (default "127.0.0.1")
+---@field username? string display name; falls back to `vim.g.live_share_username`
+---@field workspace_root? string host workspace root; defaults to the cwd
+---@field debug? boolean enable debug logging (default false)
+---@field openssl_lib? string explicit path to libcrypto when auto-detection fails
+---@field transport? LiveShare.Transport transport backend: "ws" (default) or "punch"
+---@field stun? string STUN server used when transport = "punch" (default "stun.l.google.com:19302")
+---@field allow_sensitive_files? boolean serve sensitive files (.env, keys, …) instead of hiding them (default false)
+---@field extra_sensitive_patterns? string[] extra Lua patterns appended to the sensitive-file filter
+---@field audit_log? boolean|string enable the JSONL audit log (default true), or a string path to override its location
+---@field scan_use_gitignore? boolean use `git ls-files` for a gitignore-aware listing when possible (default true)
+---@field scan_max_files? integer hard cap on files in `workspace_info`; <=0 disables the cap (default 50000)
+---@field scan_max_depth? integer max recursion depth for the manual workspace walker (default 20)
+---@field scan_extra_ignore? string[] extra directory basenames to skip during the manual walk
+---@field terminal_scrollback_bytes? integer bytes of shared-terminal scrollback replayed to late joiners; 0 disables (default 65536)
+
 local M = {}
 
+---@type LiveShare.Config|nil
 local _config = nil
 
 local function default_service_url()
@@ -66,6 +92,8 @@ local defaults = {
   terminal_scrollback_bytes = 65536,
 }
 
+---Merge user config over the defaults and wire up the plugin's modules.
+---@param user_config? LiveShare.Config
 function M.setup(user_config)
   local cfg = vim.tbl_deep_extend("force", defaults, user_config or {})
   if not cfg.service_url then
@@ -77,6 +105,8 @@ function M.setup(user_config)
   require("live-share.tunnel").setup(cfg)
 end
 
+---Return the merged, active configuration, or nil if `setup` hasn't run.
+---@return LiveShare.Config|nil
 function M.get_config()
   return _config
 end

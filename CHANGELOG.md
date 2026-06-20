@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (no further bumps); the open-pair (VS Code) port is deferred until all
   stages land and `develop` is merged to Nightly.
 
+### Documentation
+- **LuaCATS type annotations on the core public modules** — `init.lua`
+  (`LiveShare.Config`, `setup`, `get_config`), `session.lua` (shared-state
+  class plus the `LiveShare.Message`/`PeerId`/`Role`/`Transport` aliases),
+  `collab/connection.lua` (`Listener`/`Connector` classes and their methods),
+  `collab/protocol.lua` (`Encryptor`/`Decryptor` plus `encode`/`decode`), and
+  `collab/crypto.lua` (encrypt/decrypt, X25519, HKDF, HMAC, fingerprint,
+  base64url). Comments only — no behavioural change; improves lua-ls
+  completion/diagnostics and lowers the barrier to contribution.
+
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
   — replaces the single `workspace_info` message with a sequence of

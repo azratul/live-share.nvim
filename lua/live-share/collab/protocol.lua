@@ -62,6 +62,11 @@ end
 
 -- ── Static codec (plaintext fallback / v3-compatible path) ───────────────────
 
+---Static codec (plaintext fallback / v3-compatible path): JSON-encode a message,
+---optionally wrapping it as `[12-byte random nonce][AES-GCM ciphertext+tag]`.
+---@param msg LiveShare.Message
+---@param key? string 32-byte session key; nil for plaintext
+---@return string payload
 function M.encode(msg, key)
   local payload = vim.json.encode(msg)
   if not key then
@@ -72,6 +77,10 @@ function M.encode(msg, key)
   return nonce .. crypto.encrypt(payload, key, nonce)
 end
 
+---Inverse of `encode`: decrypt (if keyed) and JSON-decode a payload.
+---@param payload string
+---@param key? string 32-byte session key; nil for plaintext
+---@return LiveShare.Message|nil msg nil on auth failure or malformed JSON
 function M.decode(payload, key)
   if key then
     if #payload < 12 then
@@ -99,6 +108,17 @@ end
 --
 -- Plaintext mode (key == nil) returns a static codec that just JSON-encodes;
 -- callers don't have to special-case the unencrypted path.
+
+---An object that serializes outbound messages, managing the v4 deterministic
+---counter nonce and AAD when keyed.
+---@class LiveShare.Encryptor
+---@field encode fun(self: LiveShare.Encryptor, msg: LiveShare.Message): string
+---@field _state? fun(self: LiveShare.Encryptor): { counter: integer, salt: string } debug/test only
+
+---Create a v4 AEAD encryptor (or a plaintext JSON codec when `key` is nil).
+---@param key? string 32-byte session key
+---@param from_peer_fn? fun(): LiveShare.PeerId returns the current sender peer_id, queried per-encode
+---@return LiveShare.Encryptor
 function M.new_encryptor(key, from_peer_fn)
   if not key then
     return {
@@ -135,6 +155,15 @@ end
 -- the guest's perspective; the connection's peer_id from the server's
 -- perspective).  The salt + counter come from the wire (the 12-byte nonce
 -- prefix); only the AAD construction needs from_peer.
+
+---An object that deserializes inbound messages, verifying the v4 AAD when keyed.
+---@class LiveShare.Decryptor
+---@field decode fun(self: LiveShare.Decryptor, payload: string, from_peer?: LiveShare.PeerId): LiveShare.Message|nil
+---@field counter_of? fun(self: LiveShare.Decryptor, payload: string): integer|nil parse the frame counter without decrypting (test only)
+
+---Create a v4 AEAD decryptor (or a plaintext JSON codec when `key` is nil).
+---@param key? string 32-byte session key
+---@return LiveShare.Decryptor
 function M.new_decryptor(key)
   if not key then
     return {

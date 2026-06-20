@@ -110,6 +110,9 @@ local EVP_CTRL_GCM_SET_TAG = 0x11
 local NONCE_LEN = 12
 local TAG_LEN = 16
 
+---Cryptographically secure random bytes via OpenSSL RAND_bytes.
+---@param n integer number of bytes
+---@return string|nil bytes nil when OpenSSL is unavailable
 function M.random_bytes(n)
   if not M.available then
     return nil
@@ -119,14 +122,21 @@ function M.random_bytes(n)
   return ffi.string(buf, n)
 end
 
+---Generate a fresh 32-byte AES-256 session key.
+---@return string|nil key nil when OpenSSL is unavailable
 function M.generate_key()
   return M.random_bytes(32)
 end
 
--- Returns ciphertext .. tag.
--- `aad` is optional Additional Authenticated Data: not encrypted, but bound
--- into the GCM tag so any tampering is detected on decrypt.  Pass nil for
--- v3-compatible behaviour (no AAD).
+---AES-256-GCM encrypt. Returns `ciphertext .. tag` (tag appended, 16 bytes).
+---`aad` is optional Additional Authenticated Data: not encrypted, but bound
+---into the GCM tag so any tampering is detected on decrypt. Pass nil for
+---v3-compatible behaviour (no AAD).
+---@param plaintext string
+---@param key string 32-byte key
+---@param nonce string 12-byte nonce
+---@param aad? string additional authenticated data
+---@return string ciphertext `ciphertext .. tag`, or the plaintext unchanged when OpenSSL is unavailable
 function M.encrypt(plaintext, key, nonce, aad)
   if not M.available then
     return plaintext
@@ -153,8 +163,14 @@ function M.encrypt(plaintext, key, nonce, aad)
   return ffi.string(out, ct_len) .. ffi.string(tag, TAG_LEN)
 end
 
--- Returns plaintext, or nil if authentication fails (wrong key, tampered
--- ciphertext, or AAD mismatch — the GCM tag verifies all three together).
+---AES-256-GCM decrypt and authenticate. Returns the plaintext, or nil if
+---authentication fails (wrong key, tampered ciphertext, or AAD mismatch — the
+---GCM tag verifies all three together).
+---@param ciphertext_with_tag string `ciphertext .. tag` as produced by `encrypt`
+---@param key string 32-byte key
+---@param nonce string 12-byte nonce
+---@param aad? string additional authenticated data; must match what was used to encrypt
+---@return string|nil plaintext nil on authentication failure
 function M.decrypt(ciphertext_with_tag, key, nonce, aad)
   if not M.available then
     return ciphertext_with_tag
@@ -200,7 +216,9 @@ end
 
 local NID_X25519 = 1034 -- OpenSSL constant; stable across 1.1.1+.
 
--- Returns priv (32 bytes), pub (32 bytes), or nil + error string.
+---Generate an ephemeral X25519 keypair for the v4 ECDH handshake.
+---@return string|nil priv 32-byte private key, or nil on failure
+---@return string err_or_pub 32-byte public key on success, or an error string on failure
 function M.x25519_keypair()
   if not M.available then
     return nil, "openssl unavailable"
@@ -235,6 +253,11 @@ function M.x25519_keypair()
 end
 
 -- Returns 32-byte shared secret, or nil + error string.
+---Derive the X25519 ECDH shared secret from our private key and the peer's public key.
+---@param priv_bytes string our 32-byte private key
+---@param peer_pub_bytes string the peer's 32-byte public key
+---@return string|nil secret 32-byte shared secret, or nil on failure
+---@return string? err error string when secret is nil
 function M.x25519_shared(priv_bytes, peer_pub_bytes)
   if not M.available then
     return nil, "openssl unavailable"
@@ -288,6 +311,10 @@ end)()
 
 -- ── HMAC-SHA256 ──────────────────────────────────────────────────────────────
 
+---HMAC-SHA256.
+---@param key string
+---@param data string
+---@return string|nil mac 32-byte MAC, or nil when OpenSSL is unavailable
 function M.hmac_sha256(key, data)
   if not M.available then
     return nil
@@ -327,6 +354,12 @@ local function hkdf_expand(prk, info, length)
   return table.concat(out):sub(1, length)
 end
 
+---HKDF-SHA256 (RFC 5869): derive key material from input keying material.
+---@param ikm string input keying material (e.g. the ECDH shared secret)
+---@param salt? string optional salt; defaults to 32 zero bytes
+---@param info? string optional context/application info
+---@param length? integer output length in bytes (default 32)
+---@return string|nil okm derived key material, or nil when OpenSSL is unavailable
 function M.hkdf_sha256(ikm, salt, info, length)
   if not M.available or not ikm then
     return nil
@@ -341,7 +374,9 @@ function M.hkdf_sha256(ikm, salt, info, length)
   return hkdf_expand(prk, info, length or 32)
 end
 
--- SHA-256.  Returns a 32-byte binary digest (or nil if OpenSSL is unavailable).
+---SHA-256.
+---@param input string
+---@return string|nil digest 32-byte binary digest, or nil when OpenSSL is unavailable
 function M.sha256(input)
   if not M.available then
     return nil
@@ -359,10 +394,12 @@ function M.sha256(input)
   return ffi.string(out, outl[0])
 end
 
--- Short, human-readable fingerprint of the session key for out-of-band
--- verification.  Format: "AB-CD-EF-12-34-67" (6 bytes hex, 47 bits of entropy).
--- Both host and guest derive this independently from the shared key, so a
--- mismatch means the URL fragment was rewritten in transit.
+---Short, human-readable fingerprint of the session key for out-of-band
+---verification. Format: "AB-CD-EF-12-34-67" (6 bytes hex, 47 bits of entropy).
+---Both host and guest derive this independently from the shared key, so a
+---mismatch means the URL fragment was rewritten in transit.
+---@param key string|nil session key
+---@return string|nil fingerprint nil if key is missing or OpenSSL is unavailable
 function M.fingerprint(key)
   if not key then
     return nil
@@ -385,6 +422,9 @@ end
 -- Base64url (RFC 4648 §5, no padding)
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
+---Base64url-encode a binary string (RFC 4648 §5, no padding).
+---@param s string
+---@return string
 function M.b64url_encode(s)
   local res, i = {}, 1
   while i <= #s do
@@ -408,6 +448,9 @@ for i = 1, #B64 do
   B64_DEC[B64:sub(i, i)] = i - 1
 end
 
+---Base64url-decode (RFC 4648 §5, padding-insensitive).
+---@param s string
+---@return string
 function M.b64url_decode(s)
   local res, i = {}, 1
   while i <= #s do
