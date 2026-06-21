@@ -35,6 +35,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   receive an explicit `LiveShare.HostContext` (the live connection, the
   tracked-buffer table, and the seq/username accessors) instead of reaching
   into host-module locals. No behavioural or wire change.
+- **Split the guest message dispatch out of `guest.lua`** — the ~390-line
+  `on_message` (state gate + per-type handlers) moved into a new
+  `live-share/guest/dispatch.lua`, leaving `guest.lua` focused on the
+  connection lifecycle and cursor/focus autocmds (661 → 293 lines). The guest's
+  mutable protocol state now lives on a shared `LiveShare.GuestState` table
+  handed to handlers via `LiveShare.GuestContext`. No behavioural or wire change.
 
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
