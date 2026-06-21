@@ -19,6 +19,8 @@ local protocol = require("live-share.collab.protocol")
 local tcp_trans = require("live-share.collab.transport.tcp")
 local ws_trans = require("live-share.collab.transport.ws")
 local crypto = require("live-share.collab.crypto")
+local rate_limit = require("live-share.collab.rate_limit")
+local subkey = require("live-share.collab.subkey")
 local log = require("live-share.collab.log")
 local uv = vim.uv or vim.loop
 
@@ -27,22 +29,17 @@ local pending = {} -- peer_id -> { handle, framer, mode, pending_timer }  (await
 local clients = {} -- peer_id -> { handle, framer, mode }  (approved peers)
 local peer_roles = {} -- peer_id -> "rw" | "ro"
 local peer_names = {} -- peer_id -> name (for synthesising bye on abrupt disconnect)
-local rate_buckets = {} -- peer_id -> { [kind] = { tokens, last_ms } }  (token-bucket rate limit)
 local last_seen = {} -- peer_id -> ms timestamp of last byte received from peer
 local heartbeat_timer = nil
 local next_peer = 1
 local on_message = nil
 local session_key = nil
 -- v4 forward secrecy (stage 4): each peer gets its own ephemeral X25519
--- handshake (`dh_offer`/`dh_accept`) and its own AEAD subkey derived via
--- HKDF.  The URL-fragment master key is no longer used to encrypt traffic
--- directly — it acts as a pre-shared key (PSK) authenticating the public
--- keys via HMAC-SHA256.  Encryptor/decryptor live on the per-peer record.
---
--- Subkey derivation (RFC 5869):
---   PRK = HMAC(salt = PSK, IKM = X25519(my_priv, peer_pub))
---   subkey = HKDF-Expand(PRK, info = "ls-v4-subkey|" || peer_id_be4, L = 32)
-local SUBKEY_INFO_PREFIX = "ls-v4-subkey|"
+-- handshake (`dh_offer`/`dh_accept`) and its own AEAD subkey derived via HKDF
+-- (see collab/subkey.lua).  The URL-fragment master key is no longer used to
+-- encrypt traffic directly — it acts as a pre-shared key (PSK) authenticating
+-- the public keys via HMAC-SHA256.  Encryptor/decryptor live on the per-peer
+-- record.
 
 -- Maximum bytes per protocol frame.  Frames declaring a length above this are
 -- dropped at the transport reader before any allocation, and the connection
@@ -66,15 +63,6 @@ local PENDING_TIMEOUT_MS = 90 * 1000
 local PING_INTERVAL_MS = 15 * 1000
 local IDLE_KILL_MS = 30 * 1000
 
--- Per-peer rate limits.  Defends against a malicious or buggy guest spamming
--- patches/cursors and saturating the host's main loop.  Numbers are generous
--- enough for normal interactive editing (a fast typist generates ~10 patches
--- per second; cursor moves are debounced at 100 ms ≈ 10/s).
-local RATE_LIMITS = {
-  patch = 100, -- patches per second per peer
-  cursor = 60, -- cursor updates per second per peer
-}
-
 -- Hex encoder for SHA-256 digests stamped onto inbound messages
 -- (`msg.__payload_hash`) for the audit log.
 local HEX = "0123456789abcdef"
@@ -86,32 +74,6 @@ local function to_hex(bytes)
     out[#out + 1] = HEX:sub(b % 16 + 1, b % 16 + 1)
   end
   return table.concat(out)
-end
-
--- Token bucket: refills at `rate` tokens/sec up to capacity = rate (= 1 s burst).
--- Returns true iff a token is available and consumes it.
-local function rate_allow(peer_id, kind)
-  local rate = RATE_LIMITS[kind]
-  if not rate then
-    return true
-  end
-  local now = uv.now()
-  rate_buckets[peer_id] = rate_buckets[peer_id] or {}
-  local bucket = rate_buckets[peer_id][kind]
-  if not bucket then
-    bucket = { tokens = rate, last_ms = now }
-    rate_buckets[peer_id][kind] = bucket
-  end
-  local elapsed = now - bucket.last_ms
-  if elapsed > 0 then
-    bucket.tokens = math.min(rate, bucket.tokens + elapsed * rate / 1000)
-    bucket.last_ms = now
-  end
-  if bucket.tokens >= 1 then
-    bucket.tokens = bucket.tokens - 1
-    return true
-  end
-  return false
 end
 
 -- Module-level framers so broadcast can use them as stable cache keys.
@@ -172,27 +134,6 @@ local function stop_heartbeat()
     heartbeat_timer:close()
     heartbeat_timer = nil
   end
-end
-
--- Encode peer_id as 4-byte big-endian for HKDF info binding.
-local function u32_be(n)
-  return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
-end
-
--- Derive a 32-byte AEAD subkey from a peer's X25519 shared secret.  Both
--- sides feed the same PSK (the URL fragment master key) and the same
--- peer_id, so they end up with the same subkey without ever transmitting it.
-local function derive_subkey(shared, peer_id)
-  return crypto.hkdf_sha256(shared, session_key, SUBKEY_INFO_PREFIX .. u32_be(peer_id), 32)
-end
-
--- Build a fresh encryptor/decryptor pair bound to `subkey`.  Host is always
--- from_peer = 0 on outbound; the inbound peer_id is supplied by the caller
--- at decode time (see process()).
-local function make_codec(subkey)
-  return protocol.new_encryptor(subkey, function()
-    return 0
-  end), protocol.new_decryptor(subkey)
 end
 
 function M.start(ip, port, key)
@@ -260,7 +201,7 @@ function M.start(ip, port, key)
         return
       end
       -- Per-peer rate limit (defends against patch/cursor flooding).
-      if not rate_allow(peer_id, msg.t) then
+      if not rate_limit.allow(peer_id, msg.t) then
         dbg("peer " .. peer_id .. " rate-limited (" .. tostring(msg.t) .. ")")
         return
       end
@@ -290,7 +231,7 @@ function M.start(ip, port, key)
         pending[peer_id] = nil
         clients[peer_id] = nil
         peer_roles[peer_id] = nil
-        rate_buckets[peer_id] = nil
+        rate_limit.forget(peer_id)
         last_seen[peer_id] = nil
         local name = peer_names[peer_id]
         peer_names[peer_id] = nil
@@ -334,13 +275,13 @@ function M.start(ip, port, key)
         on_disconnect("dh derive")
         return false
       end
-      local subkey = derive_subkey(shared, peer_id)
-      if not subkey then
+      local sk = subkey.derive(shared, peer_id, session_key)
+      if not sk then
         dbg("peer " .. peer_id .. " — HKDF failed")
         on_disconnect("dh hkdf")
         return false
       end
-      r.encryptor, r.decryptor = make_codec(subkey)
+      r.encryptor, r.decryptor = subkey.make_codec(sk)
       r.dh_priv = nil
       r.dh_state = "established"
       dbg("peer " .. peer_id .. " — DH established, switching to per-peer subkey")
@@ -719,7 +660,7 @@ function M.kick(peer_id)
   pending[peer_id] = nil
   peer_roles[peer_id] = nil
   peer_names[peer_id] = nil
-  rate_buckets[peer_id] = nil
+  rate_limit.forget(peer_id)
   last_seen[peer_id] = nil
   dbg("peer " .. peer_id .. " kicked")
   return true
@@ -745,7 +686,7 @@ function M.stop()
   clients = {}
   peer_roles = {}
   peer_names = {}
-  rate_buckets = {}
+  rate_limit.reset()
   last_seen = {}
   next_peer = 1
   session_key = nil

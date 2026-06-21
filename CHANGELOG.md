@@ -41,6 +41,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection lifecycle and cursor/focus autocmds (661 → 293 lines). The guest's
   mutable protocol state now lives on a shared `LiveShare.GuestState` table
   handed to handlers via `LiveShare.GuestContext`. No behavioural or wire change.
+- **Extracted two self-contained helpers out of `collab/server.lua`** — the
+  per-peer token-bucket rate limiter is now `collab/rate_limit.lua` (encapsulated
+  bucket state behind `allow`/`forget`/`reset`), and the v4 forward-secrecy
+  subkey derivation + per-peer codec construction is now `collab/subkey.lua`
+  (`derive`/`make_codec`). server.lua keeps its transport/handshake logic but
+  drops the policy and crypto-derivation details. No behavioural or wire change.
 
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
