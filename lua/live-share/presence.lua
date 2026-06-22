@@ -21,7 +21,10 @@ local function hl_for(peer_id)
   return HL_GROUPS[((peer_id - 1) % #HL_GROUPS) + 1]
 end
 
--- Update a peer's display name and optionally their active file.
+---Update a peer's display name and optionally their active file.
+---@param peer_id LiveShare.PeerId
+---@param name? string display name
+---@param active_path? string workspace-relative path the peer is viewing
 function M.update_peer(peer_id, name, active_path)
   peers[peer_id] = peers[peer_id] or {}
   if name then
@@ -32,7 +35,10 @@ function M.update_peer(peer_id, name, active_path)
   end
 end
 
--- Record that a peer changed their active file (no extmark change).
+---Record that a peer changed their active file (no extmark change).
+---@param peer_id LiveShare.PeerId
+---@param path string workspace-relative path
+---@param name? string display name
 function M.update_focus(peer_id, path, name)
   peers[peer_id] = peers[peer_id] or {}
   peers[peer_id].active_path = path
@@ -41,8 +47,14 @@ function M.update_focus(peer_id, path, name)
   end
 end
 
--- Update a peer's cursor position and render the extmark in buf.
--- sel (optional): { lnum, col, end_lnum, end_col } — visual selection range (0-indexed, inclusive end).
+---Update a peer's cursor position and render its extmark in `buf`.
+---@param buf integer target buffer handle
+---@param peer_id LiveShare.PeerId
+---@param lnum integer 0-based cursor line
+---@param col integer 0-based cursor column
+---@param name? string display name
+---@param path? string workspace-relative path
+---@param sel? { lnum: integer, col: integer, end_lnum: integer, end_col: integer } visual selection range (0-indexed, inclusive end)
 function M.update_cursor(buf, peer_id, lnum, col, name, path, sel)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return
@@ -96,7 +108,8 @@ function M.update_cursor(buf, peer_id, lnum, col, name, path, sel)
   extmarks[peer_id] = { buf = buf, mark_id = id, sel_mark_id = sel_mark_id }
 end
 
--- Remove a peer entirely (disconnected).
+---Remove a peer entirely (disconnected): drop its marks and record.
+---@param peer_id LiveShare.PeerId
 function M.remove_peer(peer_id)
   local old = extmarks[peer_id]
   if old and vim.api.nvim_buf_is_valid(old.buf) then
@@ -109,7 +122,8 @@ function M.remove_peer(peer_id)
   peers[peer_id] = nil
 end
 
--- Clear all marks associated with a specific buffer (e.g. file closed).
+---Clear all marks associated with a specific buffer (e.g. file closed).
+---@param buf integer buffer handle
 function M.clear_buf(buf)
   for pid, old in pairs(extmarks) do
     if old.buf == buf then
@@ -124,7 +138,7 @@ function M.clear_buf(buf)
   end
 end
 
--- Clear everything (session ended).
+---Clear everything (session ended): drop all marks and peer records.
 function M.clear_all()
   for _, old in pairs(extmarks) do
     if vim.api.nvim_buf_is_valid(old.buf) then
@@ -138,7 +152,8 @@ function M.clear_all()
   peers = {}
 end
 
--- Returns list of { peer_id, name, active_path, lnum, col }.
+---Snapshot of all known peers.
+---@return { peer_id: LiveShare.PeerId, name: string, active_path: string|nil, lnum: integer|nil, col: integer|nil }[]
 function M.get_all()
   local result = {}
   for pid, p in pairs(peers) do

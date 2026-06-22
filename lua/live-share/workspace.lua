@@ -153,6 +153,8 @@ M.is_sensitive = is_sensitive
 local root = nil
 local real_root = nil -- canonicalised root for sandbox checks
 
+---Configure the workspace scanner and sandbox from the merged config.
+---@param cfg LiveShare.Config|nil
 function M.setup(cfg)
   cfg = cfg or {}
   allow_sensitive = cfg.allow_sensitive_files == true
@@ -182,11 +184,15 @@ function M.setup(cfg)
   end
 end
 
+---Set the workspace root (and its canonicalised form for sandbox checks).
+---@param path string|nil absolute path, or nil to clear
 function M.set_root(path)
   root = path
   real_root = path and uv.fs_realpath(path) or nil
 end
 
+---The current workspace root, or nil if unset.
+---@return string|nil
 function M.get_root()
   return root
 end
@@ -236,6 +242,8 @@ end
 -- gate by the host on every incoming message that carries a `path` field, so
 -- a malicious guest can't pollute presence/follow state with bogus paths via
 -- `cursor`, `focus`, or `terminal_*` broadcasts.
+---@param path any value to validate (expected workspace-relative string)
+---@return boolean allowed true iff the path is safe to act on
 function M.path_allowed(path)
   local ok = sandbox_check(path)
   if not ok then
@@ -445,6 +453,7 @@ end
 -- (default), defer to `git ls-files -co --exclude-standard` for speed and
 -- gitignore awareness.  Falls back to a manual recursive walk otherwise.
 -- Always applies the sensitive-file filter and `scan_max_files` cap.
+---@return string[] paths flat, sorted, workspace-relative file paths
 function M.scan()
   if not root then
     return {}
@@ -470,11 +479,14 @@ function M.scan()
 end
 
 -- True if the most recent scan() call hit the `scan_max_files` cap.
+---@return boolean
 function M.scan_was_truncated()
   return last_scan_truncated
 end
 
--- Read a workspace file. Returns lines table, or nil on error.
+---Read a workspace file as a list of lines.
+---@param path string workspace-relative path
+---@return string[]|nil lines nil on error or if outside the sandbox
 function M.read_file(path)
   local abs = safe_abs(path)
   if not abs then
@@ -506,7 +518,10 @@ function M.read_file(path)
   return lines
 end
 
--- Write lines back to a workspace file. Returns true on success.
+---Write lines back to a workspace file.
+---@param path string workspace-relative path
+---@param lines string[] file contents, one entry per line
+---@return boolean ok true on success
 function M.write_file(path, lines)
   local abs = safe_abs(path)
   if not abs then
@@ -524,8 +539,13 @@ function M.write_file(path, lines)
   return true
 end
 
--- Apply a patch (from a client) to a file that isn't open in Neovim.
--- Reads, patches in-memory, writes back. Returns true on success.
+---Apply a patch (from a client) to a file that isn't open in Neovim: read,
+---patch in memory, write back.
+---@param path string workspace-relative path
+---@param lnum integer 0-based first line to replace
+---@param count integer lines to replace, or -1 for "to end of file"
+---@param new_lines string[]|nil replacement lines
+---@return boolean ok true on success
 function M.apply_patch_to_disk(path, lnum, count, new_lines)
   local lines = M.read_file(path) or {}
   local end_idx = count == -1 and #lines or (lnum + count)

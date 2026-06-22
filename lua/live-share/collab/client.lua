@@ -58,6 +58,8 @@ local function dbg(msg)
   log.dbg("client", msg)
 end
 
+---Register the callback invoked for every decoded inbound message.
+---@param cb fun(msg: LiveShare.Message)
 function M.setup(cb)
   on_message = cb
 end
@@ -359,8 +361,13 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
   end)
 end
 
--- mode: "ws" (default) or "tcp"
--- on_error: optional callback called when all retries are exhausted or DNS fails
+---Resolve the host and connect, with exponential-backoff reconnect.
+---@param host string host address to resolve
+---@param port integer host port
+---@param key string|nil 32-byte session key (PSK), or nil for plaintext
+---@param mode? LiveShare.Transport "ws" (default) or "tcp"
+---@param attempt? integer internal reconnect attempt counter (omit on first call)
+---@param on_error? fun() called when all retries are exhausted or DNS fails
 function M.connect(host, port, key, mode, attempt, on_error)
   attempt = attempt or 0
   mode = mode or "ws"
@@ -390,6 +397,8 @@ function M.connect(host, port, key, mode, attempt, on_error)
   end)
 end
 
+---Encode and send a message to the host (no-op if not connected).
+---@param msg LiveShare.Message
 function M.send(msg)
   if not (conn and not conn:is_closing()) then
     return
@@ -410,6 +419,7 @@ function M.send(msg)
   end
 end
 
+---Disconnect and reset all client state.
 function M.stop()
   close_conn()
   session_key = nil

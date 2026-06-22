@@ -151,11 +151,18 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
+---Store the merged config for later use by `connect`.
+---@param cfg LiveShare.Config
 function M.setup(cfg)
   config = cfg
   log.enabled = cfg and cfg.debug or false
 end
 
+---Connect to a host session.
+---@param host_addr string host address (or signaling URL when mode == "punch")
+---@param port integer|nil host port (ignored for punch)
+---@param key_b64 string|nil base64url session key from the URL fragment, or nil for plaintext
+---@param mode? LiveShare.Transport transport: "ws" (default), "tcp", or "punch"
 function M.connect(host_addr, port, key_b64, mode)
   session.role = "guest"
   session.transport = mode or "ws"
@@ -232,8 +239,9 @@ function M.connect(host_addr, port, key_b64, mode)
   end
 end
 
--- Request a specific file from the host workspace and open it.
--- If the buffer already exists, just switch to it.
+---Request a specific file from the host workspace and open it.  If the buffer
+---already exists, just switch to it.
+---@param path string workspace-relative path
 function M.request_file(path)
   if session.role ~= "guest" then
     vim.notify("live-share: not connected as guest", vim.log.levels.WARN)
@@ -247,18 +255,25 @@ function M.request_file(path)
   conn:send({ t = "file_request", path = path })
 end
 
+---The role assigned by the host, or nil before `hello` arrives.
+---@return LiveShare.Role|nil
 function M.get_role()
   return gstate.guest_role
 end
 
+---The flat list of remote workspace paths received so far.
+---@return string[]
 function M.get_workspace_files()
   return gstate.workspace_files
 end
 
+---The display name of the remote workspace root, or nil before it arrives.
+---@return string|nil
 function M.get_workspace_root_name()
   return gstate.workspace_root_name
 end
 
+---Disconnect from the host and reset all guest state.
 function M.stop()
   vim.api.nvim_clear_autocmds({ group = cursor_aug })
   if cursor_timer then

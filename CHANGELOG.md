@@ -18,14 +18,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stages land and `develop` is merged to Nightly.
 
 ### Documentation
-- **LuaCATS type annotations on the core public modules** — `init.lua`
+- **LuaCATS type annotations across the public modules** — `init.lua`
   (`LiveShare.Config`, `setup`, `get_config`), `session.lua` (shared-state
   class plus the `LiveShare.Message`/`PeerId`/`Role`/`Transport` aliases),
   `collab/connection.lua` (`Listener`/`Connector` classes and their methods),
-  `collab/protocol.lua` (`Encryptor`/`Decryptor` plus `encode`/`decode`), and
+  `collab/protocol.lua` (`Encryptor`/`Decryptor` plus `encode`/`decode`),
   `collab/crypto.lua` (encrypt/decrypt, X25519, HKDF, HMAC, fingerprint,
-  base64url). Comments only — no behavioural change; improves lua-ls
-  completion/diagnostics and lowers the barrier to contribution.
+  base64url), and the role/engine modules `host.lua`, `guest.lua`,
+  `collab/server.lua`, `collab/client.lua`, `workspace.lua`, `presence.lua`,
+  `buffer_registry.lua`, and `follow.lua`. Comments only — no behavioural
+  change; improves lua-ls completion/diagnostics and lowers the barrier to
+  contribution.
+- **Added `.luarc.json`** so lua-language-server picks up the LuaJIT runtime,
+  the `vim` global (and busted test globals), and the Neovim/luv libraries on
+  first clone — contributors get working completion and diagnostics without
+  any manual setup. Formatting is left to StyLua (`format.enable: false`).
 
 ### Internal
 - **Split the host message dispatch out of `host.lua`** — the ~290-line

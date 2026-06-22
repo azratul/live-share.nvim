@@ -91,6 +91,8 @@ end
 -- Forward declaration (used inside heartbeat timer below).
 local close_peer
 
+---Register the callback invoked for every decoded inbound message.
+---@param cb fun(msg: LiveShare.Message, peer_id: LiveShare.PeerId)
 function M.setup(cb)
   on_message = cb
 end
@@ -136,6 +138,11 @@ local function stop_heartbeat()
   end
 end
 
+---Bind and start listening for peers.
+---@param ip string bind address
+---@param port integer bind port
+---@param key string|nil 32-byte session key (PSK), or nil for plaintext
+---@return boolean ok true if the server bound and started listening
 function M.start(ip, port, key)
   session_key = key
   srv = uv.new_tcp()
@@ -514,6 +521,8 @@ end
 
 -- ── Approval API ──────────────────────────────────────────────────────────────
 
+---Move a pending peer into the active client set so it receives broadcasts.
+---@param peer_id LiveShare.PeerId
 function M.approve(peer_id)
   local p = pending[peer_id]
   if not p then
@@ -532,20 +541,32 @@ function M.approve(peer_id)
   dbg("peer " .. peer_id .. " approved")
 end
 
+---Set a peer's permission role.
+---@param peer_id LiveShare.PeerId
+---@param role LiveShare.Role
 function M.set_role(peer_id, role)
   peer_roles[peer_id] = role
   dbg("peer " .. peer_id .. " role = " .. tostring(role))
 end
 
+---Get a peer's permission role, or nil if unknown.
+---@param peer_id LiveShare.PeerId
+---@return LiveShare.Role|nil
 function M.get_role(peer_id)
   return peer_roles[peer_id]
 end
 
+---Set a peer's display name (used to synthesise `bye` on abrupt disconnect).
+---@param peer_id LiveShare.PeerId
+---@param name string
 function M.set_name(peer_id, name)
   peer_names[peer_id] = name
   dbg("peer " .. peer_id .. " name = " .. tostring(name))
 end
 
+---Reject a pending peer: send `msg`, then close the connection shortly after.
+---@param peer_id LiveShare.PeerId
+---@param msg LiveShare.Message
 function M.reject(peer_id, msg)
   local p = pending[peer_id]
   if not p or p.handle:is_closing() then
@@ -589,6 +610,9 @@ local function log_encode_err(result)
   end)
 end
 
+---Send a message to a single approved peer (no-op if it's gone).
+---@param peer_id LiveShare.PeerId
+---@param msg LiveShare.Message
 function M.send(peer_id, msg)
   local c = clients[peer_id]
   if not (c and not c.handle:is_closing()) then
@@ -606,6 +630,9 @@ function M.send(peer_id, msg)
   end
 end
 
+---Send a message to every approved peer, optionally excluding one.
+---@param msg LiveShare.Message
+---@param except_peer? LiveShare.PeerId peer to skip
 function M.broadcast(msg, except_peer)
   -- Per-peer subkeys mean each recipient needs its own ciphertext: encode is
   -- now O(N) instead of O(1).  Counter increments per encode, salt stays
@@ -643,6 +670,9 @@ close_peer = function(peer_id, _reason)
   end
 end
 
+---Forcibly disconnect a peer and wipe all of its registry state.
+---@param peer_id LiveShare.PeerId
+---@return boolean ok true if a matching peer was found and kicked
 function M.kick(peer_id)
   local c = clients[peer_id] or pending[peer_id]
   if not c then
@@ -666,6 +696,7 @@ function M.kick(peer_id)
   return true
 end
 
+---Stop the server, close every connection, and reset all peer state.
 function M.stop()
   stop_heartbeat()
   for _, c in pairs(pending) do

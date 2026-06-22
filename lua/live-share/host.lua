@@ -211,11 +211,17 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
+---Store the merged config for later use by `start`.
+---@param cfg LiveShare.Config
 function M.setup(cfg)
   config = cfg
   log.enabled = cfg and cfg.debug or false
 end
 
+---Start hosting: generate the session key, open the listener, and attach to
+---all shareable buffers.
+---@param port? integer override for the local TCP port (defaults to config.port_internal)
+---@return boolean ok true if the session started
 function M.start(port)
   local root = (config and config.workspace_root and config.workspace_root ~= "") and config.workspace_root
     or vim.fn.getcwd()
@@ -365,6 +371,7 @@ function M.start(port)
   return true
 end
 
+---Stop hosting: detach autocmds, tear down the connection, and reset state.
 function M.stop()
   vim.api.nvim_clear_autocmds({ group = host_aug })
   vim.api.nvim_clear_autocmds({ group = cursor_aug })
@@ -392,7 +399,7 @@ function M.stop()
   session.reset()
 end
 
--- Open a shared terminal that guests can see and interact with.
+---Open a shared terminal that guests can see and interact with.
 function M.open_terminal()
   audit.log("terminal_opened")
   require("live-share.shared_terminal").open_host()
@@ -400,7 +407,9 @@ end
 
 -- ── Mid-session control (host-only) ───────────────────────────────────────────
 
--- Disconnect a peer immediately.  Sends a "bye" to remaining peers.
+---Disconnect a peer immediately and broadcast a `bye` to the rest.
+---@param peer_id LiveShare.PeerId
+---@return boolean ok false if no session is active
 function M.kick(peer_id)
   if not conn then
     return false
@@ -422,8 +431,11 @@ function M.kick(peer_id)
   return true
 end
 
--- Change a peer's role mid-session.  Subsequent patches from that peer are
--- silently dropped server-side if role == "ro".
+---Change a peer's role mid-session.  Subsequent patches from that peer are
+---silently dropped server-side if role == "ro".
+---@param peer_id LiveShare.PeerId
+---@param role LiveShare.Role
+---@return boolean ok false if no session is active or role is invalid
 function M.set_peer_role(peer_id, role)
   if not conn or (role ~= "rw" and role ~= "ro") then
     return false
@@ -433,8 +445,10 @@ function M.set_peer_role(peer_id, role)
   return true
 end
 
--- Returns the host-side role ("rw" / "ro") of a connected peer, or nil if the
--- peer is unknown.  Used by the UI to label peers in :LiveSharePeers.
+---Host-side role of a connected peer, or nil if unknown.  Used by the UI to
+---label peers in :LiveSharePeers.
+---@param peer_id LiveShare.PeerId
+---@return LiveShare.Role|nil
 function M.get_peer_role(peer_id)
   if not conn or not conn.get_role then
     return nil
@@ -442,7 +456,9 @@ function M.get_peer_role(peer_id)
   return conn:get_role(peer_id)
 end
 
--- Exposed for tunnel.lua: appends the encryption key to the share URL.
+---The `#key=<base64url>` URL fragment for the share link, or "" if unencrypted.
+---Exposed for tunnel.lua.
+---@return string
 function M.get_key_fragment()
   if not session.key then
     return ""
@@ -450,11 +466,14 @@ function M.get_key_fragment()
   return "#key=" .. crypto.b64url_encode(session.key)
 end
 
--- Returns the signaling server port when using the punch transport, else nil.
+---The local signaling-server port when using the punch transport, else nil.
+---@return integer|nil
 function M.get_signaling_port()
   return conn and conn.signaling_port
 end
 
+---Generate a random 16-byte session id as a 32-char hex string.
+---@return string
 function M.random_sid()
   math.randomseed(os.time())
   local t = {}

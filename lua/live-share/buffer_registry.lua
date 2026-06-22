@@ -20,6 +20,8 @@ local by_buf = {}
 -- Called when a tracked buffer changes locally: fn(path, patch_msg)
 local on_change_cb = nil
 
+---Register the callback fired when a tracked buffer changes locally.
+---@param cb fun(path: string, patch: LiveShare.Message)
 function M.setup(cb)
   on_change_cb = cb
 end
@@ -54,10 +56,12 @@ local function watch(path, b, applying)
   })
 end
 
--- Open (or reuse) a virtual buffer for a remote file.
--- readonly = true  → modifiable=false, no change watcher (file not open on host)
--- readonly = false → editable, change watcher active
--- Returns buf_id.
+---Open (or reuse) a virtual buffer for a remote file.
+---@param path string workspace-relative path
+---@param lines string[]|nil initial buffer contents
+---@param session_id string|nil session id used in the buffer name
+---@param readonly boolean true → modifiable=false and no change watcher; false → editable and watched
+---@return integer buf_id the buffer handle
 function M.open(path, lines, session_id, readonly)
   -- Reuse existing buffer: just update content.
   if by_path[path] then
@@ -132,7 +136,8 @@ function M.open(path, lines, session_id, readonly)
   return b
 end
 
--- Upgrade a previously read-only buffer to editable (host opened the file).
+---Upgrade a previously read-only buffer to editable (host opened the file).
+---@param path string workspace-relative path
 function M.set_editable(path)
   local e = by_path[path]
   if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then
@@ -143,8 +148,9 @@ function M.set_editable(path)
   watch(path, e.buf_id, e.applying)
 end
 
--- Apply a remote patch to the buffer for path.
--- patch = { lnum, count, lines }; count == -1 replaces the entire buffer.
+---Apply a remote patch to the buffer for `path`.
+---@param path string workspace-relative path
+---@param patch { lnum: integer, count: integer, lines: string[] } count == -1 replaces the whole buffer
 function M.apply(path, patch)
   local e = by_path[path]
   if not e then
@@ -166,6 +172,9 @@ function M.apply(path, patch)
   vim.bo[b].modifiable = was_mod
 end
 
+---Current lines of the buffer for `path` (empty list if unknown/invalid).
+---@param path string workspace-relative path
+---@return string[]
 function M.get_lines(path)
   local e = by_path[path]
   if not e or not vim.api.nvim_buf_is_valid(e.buf_id) then
@@ -174,15 +183,23 @@ function M.get_lines(path)
   return vim.api.nvim_buf_get_lines(e.buf_id, 0, -1, false)
 end
 
+---Buffer handle for `path`, or nil if not open / invalid.
+---@param path string workspace-relative path
+---@return integer|nil
 function M.get_buf(path)
   local e = by_path[path]
   return (e and vim.api.nvim_buf_is_valid(e.buf_id)) and e.buf_id or nil
 end
 
+---Workspace path mapped to a buffer handle, or nil.
+---@param buf_id integer
+---@return string|nil
 function M.get_path(buf_id)
   return by_buf[buf_id]
 end
 
+---All registered workspace paths.
+---@return string[]
 function M.list_paths()
   local result = {}
   for path in pairs(by_path) do
@@ -191,6 +208,8 @@ function M.list_paths()
   return result
 end
 
+---Close and delete the virtual buffer for `path`.
+---@param path string workspace-relative path
 function M.close(path)
   local e = by_path[path]
   if not e then
@@ -204,6 +223,7 @@ function M.close(path)
   end
 end
 
+---Close and delete every virtual buffer.
 function M.close_all()
   local paths = {}
   for path in pairs(by_path) do
