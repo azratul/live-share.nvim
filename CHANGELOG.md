@@ -33,6 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the `vim` global (and busted test globals), and the Neovim/luv libraries on
   first clone — contributors get working completion and diagnostics without
   any manual setup. Formatting is left to StyLua (`format.enable: false`).
+- **Expanded `CONTRIBUTING.md`** with a "where the code lives" orientation
+  (role modules + `*/dispatch.lua`, the `collab/` engine, supporting modules),
+  an lua-language-server note, and a single-suite test example; aligned the
+  manual-test snippet with the current `:LiveShareHostStart` command.
 
 ### Internal
 - **Split the host message dispatch out of `host.lua`** — the ~290-line

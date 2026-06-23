@@ -16,6 +16,7 @@ For large features or protocol changes, open an issue before writing code.
 - OpenSSL (`libcrypto`)
 - [StyLua](https://github.com/JohnnyMorganz/StyLua) for formatting
 - [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) for running tests
+- [lua-language-server](https://github.com/LuaLS/lua-language-server) (optional, recommended) — the repo ships a `.luarc.json`, so you get completion and type diagnostics from the LuaCATS annotations as soon as you open the project. Its built-in formatter is disabled on purpose (`format.enable: false`); StyLua is the source of truth for formatting.
 
 ## Development setup
 
@@ -31,6 +32,27 @@ Enable debug logging to get detailed output during development:
 ```lua
 require("live-share").setup({ debug = true })
 ```
+
+## Where the code lives
+
+A quick orientation before diving in (see `CLAUDE.md` for the full map):
+
+- **Entry & commands** — `lua/live-share/init.lua` (`setup()` + config defaults),
+  `lua/live-share/commands.lua`, `plugin/live-share.lua` (the `:LiveShare*` commands).
+- **Roles** — `lua/live-share/host.lua` and `guest.lua` own session lifecycle and
+  buffer/cursor wiring; the inbound-message handlers for each live in
+  `host/dispatch.lua` and `guest/dispatch.lua` (keyed by message type). Shared
+  session state is in `session.lua`.
+- **Collaboration engine** — `lua/live-share/collab/`: `connection.lua` is the
+  transport-agnostic interface host/guest program against; `server.lua` /
+  `client.lua` implement it over WebSocket/TCP; `punch_conn.lua` over P2P UDP.
+  `protocol.lua` is the codec, `crypto.lua` the AES-GCM/X25519 primitives,
+  `rate_limit.lua` and `subkey.lua` are focused helpers pulled out of the server.
+- **Supporting modules** — `workspace.lua`, `buffer_registry.lua`, `presence.lua`,
+  `follow.lua`, `shared_terminal.lua`, `audit.lua`, `ui.lua`, `health.lua`.
+
+Most modules carry LuaCATS (`---@`) annotations, so hovering a function in an
+LSP-enabled editor shows its parameters and return types.
 
 ## Code style
 
@@ -75,6 +97,14 @@ nvim --headless \
   -c "PlenaryBustedFile tests/protocol/protocol_spec.lua"
 ```
 
+**Run one suite (directory):**
+
+```bash
+nvim --headless \
+  -u tests/minimal_init.lua \
+  -c "PlenaryBustedDirectory tests/crypto/ {minimal_init = 'tests/minimal_init.lua'}"
+```
+
 Network behaviour (TCP connect, WebSocket handshake, broadcast, AES-256-GCM encryption end-to-end) is covered by the integration tests in `tests/integration/`. Neovim UI interactions (remote cursor extmarks, `vim.ui.select` approval prompts, buffer rendering) still require two running Neovim instances and must be tested manually.
 
 ## Manual testing
@@ -83,7 +113,7 @@ You need two Neovim instances: one host, one guest.
 
 ```
 # Instance 1 (host)
-:LiveShareServer
+:LiveShareHostStart
 
 # Instance 2 (guest) — paste the URL copied by the host
 :LiveShareJoin <url>
