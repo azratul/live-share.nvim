@@ -58,6 +58,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   subkey derivation + per-peer codec construction is now `collab/subkey.lua`
   (`derive`/`make_codec`). server.lua keeps its transport/handshake logic but
   drops the policy and crypto-derivation details. No behavioural or wire change.
+- **Added unit tests for the refactored code (+29 tests, 182 → 211)** — new
+  suites `tests/host/` and `tests/guest/` drive the extracted dispatch modules
+  through a fake `ctx` (recording connection) and cover the host handlers
+  (patch seq stamping, sandbox/sensitive rejection, cursor/focus/bye broadcast
+  identity, file_request success/missing/sensitive, hello_ack) and the guest
+  state gate, workspace-chunk accumulation, patch seq-gap/stale handling, and
+  hello version negotiation. `tests/rate_limit/` and `tests/subkey/` cover the
+  two new `collab/` helpers (bucket cap/forget/reset; ECDH-subkey determinism,
+  peer/PSK binding, and AEAD round-trip).
 
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**
