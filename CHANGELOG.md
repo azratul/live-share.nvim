@@ -56,8 +56,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   per-peer token-bucket rate limiter is now `collab/rate_limit.lua` (encapsulated
   bucket state behind `allow`/`forget`/`reset`), and the v4 forward-secrecy
   subkey derivation + per-peer codec construction is now `collab/subkey.lua`
-  (`derive`/`make_codec`). server.lua keeps its transport/handshake logic but
-  drops the policy and crypto-derivation details. No behavioural or wire change.
+  (`derive`/`make_codec`). No behavioural or wire change.
+- **Split the per-connection state machine out of `collab/server.lua`
+  (758 → 367 lines)** — transport auto-detection, the WebSocket upgrade, the v4
+  DH handshake, and the framed read/decrypt/dispatch loop now live in
+  `collab/peer_session.lua` (`start(deps)` runs once per accepted socket).
+  server.lua retains the cross-peer concerns: the registry, approval, broadcast,
+  and heartbeat. The two communicate through a `deps` table — the shared
+  registry (`LiveShare.PeerRegistry`), the message callback, and `close_peer`/
+  `send`. `M.stop` now clears the registry tables in place so the shared
+  reference stays valid. No behavioural or wire change.
 - **Added unit tests for the refactored code (+29 tests, 182 → 211)** — new
   suites `tests/host/` and `tests/guest/` drive the extracted dispatch modules
   through a fake `ctx` (recording connection) and cover the host handlers
