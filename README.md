@@ -75,7 +75,7 @@ This means Neovim ↔ VS Code collaboration is supported when both clients imple
 ### Requirements
 
 - **Neovim 0.9+**
-- **OpenSSL** (required — sessions will not start without it)
+- **OpenSSL ≥ 1.1.1** (for AES-256-GCM and X25519 — strongly recommended; without it the session runs in plaintext with a warning rather than silently downgrading)
 - **Tunneling Binary**:
   - `serveo.net` / `localhost.run`: requires **SSH**
   - `ngrok`: requires the `ngrok` CLI ([download](https://ngrok.com/download)) authenticated once with:
@@ -276,11 +276,11 @@ The sync model is **line-level last-write-wins**: the host assigns a monotonic `
 | Feature | Status | Notes |
 |---------|--------|-------|
 | `ws` transport | **Stable** | Default mode; WebSocket over TCP, auto-detects raw TCP vs WS from first 4 bytes |
-| AES-256-GCM encryption | **Stable** | Required; sessions will not start without OpenSSL |
+| AES-256-GCM encryption | **Stable** | On by default; per-connection X25519 ECDH handshake derives per-peer subkeys (forward secrecy). Disabled with a warning if OpenSSL/X25519 is unavailable |
 | Buffer sync (patch) | **Stable** | Line-level LWW, host-assigned monotonic seq |
 | Remote cursors and selections | **Stable** | EOL extmarks, per-peer color, visual range highlight |
 | Guest approval and roles | **Stable** | RW / RO per guest, prompted via `vim.ui.select` |
-| Protocol v3 | **Stable** | Spec in [PROTOCOL.md](./PROTOCOL.md); version negotiation in [COMPATIBILITY.md](./COMPATIBILITY.md) |
+| Protocol v4 | **Stable** | Forward-secret encryption (X25519 + HKDF per-peer subkeys); spec in [PROTOCOL.md](./PROTOCOL.md); version negotiation in [COMPATIBILITY.md](./COMPATIBILITY.md) |
 | Follow mode | **Stable** | Host and guest follow; auto-disables when followed peer disconnects |
 | Workspace browser | **Stable** | Collapsible tree or fuzzy picker (auto-detected); initial sync is slow on very large workspaces |
 | Shared terminal | **Beta** | PTY streaming works; edge cases under active testing |
@@ -319,7 +319,6 @@ Network behavior (TCP connect, WebSocket handshake, broadcast, encryption) is co
 - **`punch` transport is Linux-only for now** — direct UDP hole-punching and relay fallback are confirmed on Linux with all four built-in tunnel providers. macOS and Windows are untested.
 - **Shared terminal state is lost on guest reconnect** — if a guest disconnects and reconnects, the terminal buffer starts fresh; scrollback from before the reconnect is not replayed.
 - **No authentication beyond key possession** — any guest who obtains the share URL can attempt to join. The host approval prompt is the only gate. Share the URL only through trusted channels.
-- **No forward secrecy** — the tunnel provider sees encrypted traffic during the session and could log it. If the session URL were later leaked (e.g. via a breached chat log), that recorded traffic could in theory be decrypted retroactively. In practice this requires the tunnel provider to log traffic AND the URL to be independently compromised — an unlikely combination for typical pair programming use.
 - **Same protocol version expected** — host and guest should run the same version of live-share.nvim. See [COMPATIBILITY.md](./COMPATIBILITY.md) for the version negotiation details.
 
 ## Contributing

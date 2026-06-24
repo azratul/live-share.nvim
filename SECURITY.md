@@ -14,23 +14,25 @@ Every message exchanged between host and guest is individually encrypted with **
 - Shared terminal I/O
 - Protocol control messages (hello, init, bye, …)
 
-Encryption is mandatory. Sessions will not start if OpenSSL is unavailable.
+Encryption is on by default. If OpenSSL (with X25519) is unavailable, the host does **not** silently downgrade to weaker encryption — it disables encryption and prints a warning, so a plaintext session is always an explicit, visible state rather than a silent one.
 
-Each message carries a fresh random **12-byte nonce**. The same nonce is never reused within a session. The GCM authentication tag detects any tampering or truncation.
+Each message is sealed with a **deterministic counter nonce** (never reused within a session) and binds the sender's `peer_id` into the GCM tag as Additional Authenticated Data, so the tag detects tampering, truncation, and cross-peer replay. See [§2.3 of PROTOCOL.md](./PROTOCOL.md) for the AEAD envelope.
 
 ---
 
 ## Key exchange
 
-The host generates a **32-byte random session key** at session start. This key is appended to the share URL as a fragment:
+The host generates a **32-byte random key** at session start and appends it to the share URL as a fragment:
 
 ```
 https://some-tunnel-host/path#key=<base64url-encoded-key>
 ```
 
-URL fragments (`#…`) are a browser/client-side concept — **they are never sent to the tunnel server** in HTTP requests. The tunnel server only sees the path before the `#`. The key exists only in the URL string itself, and is transmitted to guests exclusively through whatever channel the host uses to share the URL (clipboard, chat, etc.).
+As of protocol **v4**, this fragment is a **Pre-Shared Key (PSK), not the traffic key**. It is never used to encrypt traffic directly. Instead, every connection runs a fresh ephemeral **X25519 Diffie–Hellman** handshake (`dh_offer`/`dh_accept`), and each side authenticates the other's public key with an `HMAC-SHA256(PSK, pub)` tag (a mismatch ⇒ the URL was rewritten in transit or the PSK is wrong ⇒ disconnect). The per-peer **AES-256-GCM subkey** is then derived from the DH shared secret via HKDF-SHA256, so different peers in the same session hold different subkeys. See [§2.4 of PROTOCOL.md](./PROTOCOL.md) for the handshake and subkey derivation.
 
-**Consequence:** the security of the session key is only as strong as the channel used to share the URL. Sharing over an encrypted channel (Signal, encrypted email) is safer than sharing over plaintext channels.
+URL fragments (`#…`) are a browser/client-side concept — **they are never sent to the tunnel server** in HTTP requests. The tunnel server only sees the path before the `#`. The PSK exists only in the URL string itself, and is transmitted to guests exclusively through whatever channel the host uses to share the URL (clipboard, chat, etc.).
+
+**Consequence:** the PSK gates *who may join* and authenticates the handshake, so the security of joining is only as strong as the channel used to share the URL. Sharing over an encrypted channel (Signal, encrypted email) is safer than sharing over plaintext channels. Because the traffic key is derived from an ephemeral DH exchange, a PSK leaked *after* the session ends cannot decrypt recorded traffic (see forward secrecy below).
 
 ---
 
@@ -126,24 +128,24 @@ With the `punch` transport, the signaling phase (~5 s) and any relay fallback st
 
 - Confidentiality of buffer content, file content, terminal I/O, and cursor positions against passive observers and tunnel servers.
 - Integrity of messages in transit (AES-256-GCM authentication tag).
-- Session key confidentiality from tunnel servers (URL fragment semantics).
+- PSK confidentiality from tunnel servers (URL fragment semantics).
 - Role enforcement: read-only guests cannot apply patches to the host's buffer.
+- Forward secrecy: traffic keys are ephemeral (per-connection X25519 DH), so a PSK leaked after a session ends cannot decrypt previously recorded traffic.
 
 **Out of scope** — what this plugin explicitly does not protect against:
 
 - A malicious approved host.
 - Denial-of-service via message flooding.
 - Guests sharing the session URL with unauthorized third parties.
-- Forward secrecy: a session URL leaked after the fact can be used to decrypt logged traffic.
-- Key rotation within an active session.
+- Key rotation *within* an active connection (the subkey is fixed for the life of a connection; reconnecting derives a fresh one).
 - Authentication of participants beyond URL possession and host approval.
 
 ---
 
 ## Assumptions and limitations
 
-- **OpenSSL must be present.** The plugin uses LuaJIT FFI to call into `libcrypto`. If OpenSSL is not available, the session is aborted.
-- **The session key is not rotated** during a session. A new key is generated for each new session.
-- **No forward secrecy.** The tunnel provider sees encrypted traffic during the session and could log it. If the session URL were later leaked (e.g. via a breached chat log), that recorded traffic could in theory be decrypted retroactively. In practice this requires the tunnel provider to log traffic AND the URL to be independently compromised — an unlikely combination for typical pair programming use.
+- **OpenSSL ≥ 1.1.1 must be present.** The plugin uses LuaJIT FFI to call into `libcrypto` for AES-256-GCM and X25519. If `libcrypto` is missing or lacks X25519 (`crypto.x25519_available == false`), the host **disables encryption entirely and warns** rather than silently downgrading — it never falls back to encrypting traffic with the PSK directly.
+- **The per-peer subkey is not rotated within a connection.** It is derived once from the ephemeral DH exchange at connection start; reconnecting runs a fresh handshake and derives a new subkey.
+- **Forward secrecy (as of v4).** Traffic is encrypted with a per-peer subkey derived from an ephemeral X25519 exchange, not with the URL-fragment PSK. A PSK leaked after the fact (e.g. via a breached chat log) **cannot** decrypt previously recorded traffic. Residual caveat: the tunnel provider can still observe connection metadata (timing, volume, source IP), and the PSK still gates who may join an *active* session.
 - **The URL is single-use by convention, not by enforcement.** Nothing prevents a guest from sharing the URL with a third party. The host approval prompt is the only protection against uninvited guests.
 - **Host and guest should run the same protocol version.** See [COMPATIBILITY.md](./COMPATIBILITY.md) for version negotiation details.
