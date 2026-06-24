@@ -295,11 +295,19 @@ The test suite runs under [plenary.nvim](https://github.com/nvim-lua/plenary.nvi
 
 | Suite | What it tests |
 |-------|---------------|
-| `tests/crypto/` | AES-256-GCM key generation, encrypt/decrypt round-trips, wrong-key and tamper detection, nonce uniqueness, base64url encoding |
+| `tests/crypto/` | AES-256-GCM key generation, encrypt/decrypt round-trips, wrong-key/wrong-nonce/tamper detection, short-payload rejection, binary and empty-plaintext round-trips, SHA-256 vectors (empty, `abc`), key fingerprint format/determinism, base64url URL-safe alphabet |
+| `tests/subkey/` | v4 forward-secrecy key schedule: both peers derive the same subkey from the X25519 ECDH shared secret, the subkey is bound to `peer_id` (different peers ⇒ different subkeys) and to the PSK, and the per-peer codec rejects a payload decoded under the wrong sender id |
 | `tests/websocket/` | HTTP upgrade handshake (request and response headers, `Sec-WebSocket-Accept` against the RFC 6455 test vector), binary frame encode/decode, 16-bit length extension, fragmentation across chunks, client-side masking |
 | `tests/protocol/` | JSON message codec, encrypted round-trips, wrong-key rejection, fixture validation for all message types (`connect`, `hello`, `hello_ack`, `patch`, `cursor`, `terminal_data`, `bye`, `workspace_info`, `file_request`, `file_response`, `open_files_snapshot`) |
 | `tests/transport/` | TCP framing (4-byte little-endian length prefix): encoding, multi-message reassembly, byte-by-byte delivery; WS framing layer: masked and unmasked round-trips |
 | `tests/connection/` | Listener interface contract — confirms `new_listener` and `new_punch_listener` expose the required method set |
+| `tests/rate_limit/` | Per-peer token bucket: no throttle for unconfigured kinds, burst up to the cap then throttle, independent per-peer buckets, `forget()` and `reset()` semantics |
+| `tests/host/` | Host dispatch: monotonic `seq` stamping and patch broadcast, sandbox/sensitive-file rejection of patches and `file_request`, authoritative peer-id on cursor/focus/bye broadcasts, serving and error paths for `file_request` |
+| `tests/guest/` | Guest dispatch: connection-state gate, `workspace_info_chunk` accumulation, patch `seq` tracking, `hello` handling |
+| `tests/workspace/` | Workspace sandbox (path-escape rejection), the default sensitive-file filter and its opt-out, `extra_sensitive_patterns`, and the scan ignore list (walk mode) |
+| `tests/audit/` | Append-only JSONL log: gated by `audit_log`, one line per call, append across `setup()` calls, `set_session`/`close` behavior, monotonic per-session `seq`, and the genesis/`prev_hash` SHA-256 chain |
+| `tests/scrollback/` | O(1) bounded ring buffer: in-order concatenation, whole-chunk front eviction over `max`, never below one chunk, `max = 0` keeps only the latest chunk |
+| `tests/shared_terminal/` | Snapshot for late joiners: `terminal_open` per open terminal, `terminal_data` with concatenated scrollback, `scrollback_bytes` honored, `stop()` clears state |
 | `tests/integration/` | Real TCP server/client over loopback: connect events, message delivery, broadcast to 2 and 3 simultaneous peers (TCP and mixed TCP+WS), AES-256-GCM encrypted sessions, sequential patch ordering, concurrent patches from multiple guests, abrupt-disconnect `bye` synthesis and re-broadcast (§7.3), read-only role enforcement, connection rejection, `except_peer` exclusion |
 
 Run the full suite:
