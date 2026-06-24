@@ -113,7 +113,9 @@ describe("host dispatch", function()
   end)
 
   it("serves an existing workspace file on file_request", function()
-    local fd = assert(io.open(root .. "/hello.lua", "w"))
+    -- Binary mode ("wb"): on Windows, text mode rewrites "\n" → "\r\n", which
+    -- would make read_file return lines with a trailing "\r".
+    local fd = assert(io.open(root .. "/hello.lua", "wb"))
     fd:write("line1\nline2\n")
     fd:close()
 
@@ -134,7 +136,7 @@ describe("host dispatch", function()
   end)
 
   it("refuses to serve a sensitive file_request", function()
-    local fd = assert(io.open(root .. "/.env", "w"))
+    local fd = assert(io.open(root .. "/.env", "wb"))
     fd:write("SECRET=1\n")
     fd:close()
 
