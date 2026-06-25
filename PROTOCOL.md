@@ -258,7 +258,7 @@ Resolution flow for concurrent edits to the same line:
 
 ## 4. Protocol Versioning
 
-> **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.2.0` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
+> **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.3.0-pre` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
 
 The `hello` message carries a `protocol_version` integer field. From v4 onward clients **must** disconnect on a version mismatch (earlier versions only required a warning). The current version is **4**.
 

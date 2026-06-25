@@ -15,6 +15,7 @@ For large features or protocol changes, open an issue before writing code.
 - Neovim 0.9+
 - OpenSSL (`libcrypto`)
 - [StyLua](https://github.com/JohnnyMorganz/StyLua) for formatting
+- [luacheck](https://github.com/lunarmodules/luacheck) for static analysis (run it on a LuaJIT/Lua 5.1 LuaRocks tree; the project config lives in `.luacheckrc`)
 - [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) for running tests
 - [lua-language-server](https://github.com/LuaLS/lua-language-server) (optional, recommended) — the repo ships a `.luarc.json`, so you get completion and type diagnostics from the LuaCATS annotations as soon as you open the project. Its built-in formatter is disabled on purpose (`format.enable: false`); StyLua is the source of truth for formatting.
 
@@ -69,6 +70,18 @@ stylua --check lua/ plugin/
 ```
 
 Style settings (`stylua.toml`): 2-space indentation, 120-column line width.
+
+## Static analysis
+
+Run [luacheck](https://github.com/lunarmodules/luacheck) over the source and tests:
+
+```bash
+luacheck lua/ plugin/ tests/
+```
+
+The project config (`.luacheckrc`) leaves formatting to StyLua and silences
+purely stylistic checks, so any warning luacheck reports is something worth
+fixing. CI runs the same command and must be clean.
 
 ## Running tests
 
@@ -149,11 +162,12 @@ For `punch` P2P issues, also include the tunnel service being used and whether t
 - Open an issue first for non-trivial changes to align on design before writing code.
 - Keep pull requests focused: one feature or fix per PR.
 - Protocol changes require updating `PROTOCOL.md` and `CHANGELOG.md` in the same PR.
-- All CI checks (style, tests) must pass.
+- All CI checks (style, static analysis, tests) must pass.
 
 **PR checklist:**
 
 - [ ] `stylua --check lua/ plugin/` passes
+- [ ] `luacheck lua/ plugin/ tests/` passes
 - [ ] Full test suite passes (see [Running tests](#running-tests))
 - [ ] New message types have a fixture in `tests/fixtures/` and a test in `tests/protocol/`
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`

@@ -75,6 +75,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hello version negotiation. `tests/rate_limit/` and `tests/subkey/` cover the
   two new `collab/` helpers (bucket cap/forget/reset; ECDH-subkey determinism,
   peer/PSK binding, and AEAD round-trip).
+- **Added luacheck static analysis to CI** — a new `luacheck` job runs over
+  `lua/`, `plugin/`, and `tests/`, with a `.luacheckrc` tuned for the plugin:
+  `vim` as a writable global (so `vim.bo`/`vim.b` assignments aren't false
+  positives), formatting deferred to StyLua, and the noisy stylistic checks
+  (unused arguments, shadowing, intentional empty branches) disabled while the
+  high-value ones (unused/dead locals, undefined globals) stay on. Fixed the
+  genuine findings it surfaced: a stray `uv` require and write-only `role`
+  state in `shared_terminal.lua`, an unused `_ws_key` return in
+  `collab/client.lua`, and two dead stores in the integration tests. No
+  behavioural or wire change.
 
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**

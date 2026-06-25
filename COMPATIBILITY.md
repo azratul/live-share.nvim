@@ -8,7 +8,7 @@ The wire protocol version is an integer sent in the `hello` message (host → gu
 { "t": "hello", "protocol_version": 3, ... }
 ```
 
-This integer is the only value that determines wire compatibility. The spec document version (`v1.2.0` in PROTOCOL.md) is independent — it tracks editorial changes and does not affect the wire format.
+This integer is the only value that determines wire compatibility. The spec document version (`v1.3.0-pre` in PROTOCOL.md) is independent — it tracks editorial changes and does not affect the wire format.
 
 ### Version history
 
