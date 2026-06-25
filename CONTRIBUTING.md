@@ -163,6 +163,7 @@ For `punch` P2P issues, also include the tunnel service being used and whether t
 - Keep pull requests focused: one feature or fix per PR.
 - Protocol changes require updating `PROTOCOL.md` and `CHANGELOG.md` in the same PR.
 - All CI checks (style, static analysis, tests) must pass.
+- On `develop`, a `Versioning checks` workflow also enforces a few invariants: every PR must add an entry under `[Unreleased]` (apply a `skip-changelog` label if a change genuinely needs none), the `PROTOCOL.md` title must keep its `-pre` spec version, and `protocol.lua`'s `M.VERSION` must match `PROTOCOL.md` §4.
 
 **PR checklist:**
 

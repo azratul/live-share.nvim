@@ -85,6 +85,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   state in `shared_terminal.lua`, an unused `_ws_key` return in
   `collab/client.lua`, and two dead stores in the integration tests. No
   behavioural or wire change.
+- **Added a `Versioning checks` workflow (develop-only enforcement)** — runs on
+  push/PR to `develop` and never publishes anything. It asserts the
+  version-related invariants so the tree is always release-ready: the
+  `PROTOCOL.md` title must carry a `-pre` spec version (dropping it belongs in
+  the release PR to `main`), `protocol.lua`'s `M.VERSION` must match the
+  "current version is" line in `PROTOCOL.md` §4, and a PR must add an entry
+  under `[Unreleased]` in `CHANGELOG.md` (skippable with a `skip-changelog`
+  label). Release automation itself remains a separate, main-only concern.
 
 ### Changed
 - **Workspace listing is now streamed (stage 6 of v4 migration; extends v4 in place)**

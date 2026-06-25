@@ -1,0 +1,75 @@
+name: Versioning checks
+
+# Enforcement only — this workflow never publishes anything. It keeps the
+# version-related invariants consistent on develop so that, when the changes
+# eventually flow to nightly/main and a release tag is cut, everything already
+# lines up. Releases themselves are a separate, main-only concern.
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  spec-pre:
+    name: Spec doc version is a -pre
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PROTOCOL.md title must carry a -pre spec version
+        run: |
+          title=$(head -1 PROTOCOL.md)
+          echo "Title: $title"
+          if echo "$title" | grep -qE '\(v[0-9]+\.[0-9]+\.[0-9]+-pre\)'; then
+            echo "Spec doc version is a pre-release ✓"
+          else
+            echo "::error file=PROTOCOL.md,line=1::On develop, PROTOCOL.md's title must carry a -pre spec version (e.g. v1.3.0-pre). Dropping the -pre belongs in the release PR to main."
+            exit 1
+          fi
+
+  protocol-version:
+    name: protocol_version matches PROTOCOL.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: M.VERSION in code must match "current version is" in the spec
+        run: |
+          code_ver=$(grep -oE 'M\.VERSION *= *[0-9]+' lua/live-share/collab/protocol.lua | grep -oE '[0-9]+$')
+          doc_ver=$(grep -oE 'current version is \*\*[0-9]+\*\*' PROTOCOL.md | grep -oE '[0-9]+')
+          echo "code=$code_ver doc=$doc_ver"
+          if [ -z "$code_ver" ] || [ -z "$doc_ver" ]; then
+            echo "::error::Could not parse the protocol version from protocol.lua or PROTOCOL.md (§4). Did the wording/format change?"
+            exit 1
+          fi
+          if [ "$code_ver" != "$doc_ver" ]; then
+            echo "::error::protocol.lua sets M.VERSION=$code_ver but PROTOCOL.md §4 says the current version is $doc_ver. Keep them in sync (and remember to mirror protocol changes to open-pair)."
+            exit 1
+          fi
+          echo "protocol_version $code_ver is consistent ✓"
+
+  changelog:
+    name: CHANGELOG [Unreleased] updated
+    # Only meaningful on a PR (it diffs against the base). Skippable with a label
+    # for changes that genuinely don't warrant a changelog entry.
+    if: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: This PR must add an entry under [Unreleased]
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base" HEAD | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md was touched ✓"
+          else
+            echo "::error file=CHANGELOG.md::This PR doesn't touch CHANGELOG.md. Add an entry under the [Unreleased] section, or apply the 'skip-changelog' label if it truly doesn't need one."
+            exit 1
+          fi
