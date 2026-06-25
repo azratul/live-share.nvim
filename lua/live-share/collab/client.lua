@@ -293,7 +293,7 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
       -- ── WebSocket mode ────────────────────────────────────────────────────
       dbg("TCP connected — sending WS upgrade request")
       send_frame = ws_trans.frame_client
-      local upgrade_req, _ws_key = ws_trans.client_upgrade(host)
+      local upgrade_req = ws_trans.client_upgrade(host)
       local state = "handshaking"
       local hs_buf = ""
       local frame_reader = ws_trans.new_reader(MAX_MESSAGE_BYTES)

@@ -15,7 +15,6 @@ local M = {}
 
 local log = require("live-share.collab.log")
 local scrollback = require("live-share.scrollback")
-local uv = vim.uv or vim.loop
 
 local DEFAULT_SCROLLBACK_BYTES = 65536
 
@@ -28,12 +27,10 @@ end
 -- recent shell output to peers approved after the terminal was opened.
 local terminals = {}
 local next_id = 1
-local role = nil -- "host" | "guest"
 local send_fn = nil -- broadcasts (host) or sends to host (guest)
 local scrollback_max = DEFAULT_SCROLLBACK_BYTES
 
-function M.setup(r, fn, opts)
-  role = r
+function M.setup(_role, fn, opts)
   send_fn = fn
   opts = opts or {}
   if type(opts.scrollback_bytes) == "number" and opts.scrollback_bytes >= 0 then
@@ -226,7 +223,6 @@ function M.stop()
     terminals[tid] = nil
   end
   next_id = 1
-  role = nil
   send_fn = nil
 end
 

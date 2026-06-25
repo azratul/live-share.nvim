@@ -46,12 +46,10 @@ describe("TCP mode integration", function()
   end)
 
   it("server can send a message to the peer after TCP connect", function()
-    local server_received = nil
     local client_received = nil
 
     server.setup(function(msg, peer_id)
       if msg.t == "connect" then
-        server_received = peer_id
         server.approve(peer_id)
         server.send(peer_id, { t = "hello", peer_id = peer_id, sid = "test-sid", protocol_version = 4 })
       end

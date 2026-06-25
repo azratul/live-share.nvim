@@ -123,11 +123,8 @@ describe("Sequential message delivery", function()
   end)
 
   it("five sequential patches from server arrive at peer in send order", function()
-    local peer_id_cap = nil
-
     server.setup(function(msg, peer_id)
       if msg.t == "connect" then
-        peer_id_cap = peer_id
         server.approve(peer_id)
         for i = 1, 5 do
           server.send(peer_id, {
