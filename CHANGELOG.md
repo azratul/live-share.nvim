@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2.1.5] — 2026-07-28 (current)
+
 ### Added
 - **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
   Neovim ↔ Neovim, Neovim ↔ VS Code via `open-pair`, LAN-only session (custom
@@ -43,7 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [2.1.4] — 2026-04-24 (current)
+## [2.1.4] — 2026-04-24
 
 ### Changed
 - **`punch` 0.3.2 now required** — the published 0.3.2 rock now includes container
