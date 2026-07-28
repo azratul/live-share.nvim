@@ -20,6 +20,13 @@ local config = nil
 local conn = nil
 local seq = 0
 
+-- Bumped by M.stop().  `nvim_buf_attach` callbacks are not autocmds: clearing
+-- `host_aug` does not remove them, and the only way to detach is for the
+-- callback itself to return true.  Each attachment captures the generation it
+-- was made in, so a callback belonging to a finished session retires on its
+-- next invocation instead of broadcasting to a nil `conn`.
+local generation = 0
+
 -- tracked[path] = { buf_id, applying }  — Neovim buffers currently open by host
 local tracked = {}
 local host_aug = vim.api.nvim_create_augroup("LiveShareHost", { clear = true })
@@ -77,10 +84,18 @@ local function attach_buffer(b)
   end -- already tracked
 
   local applying = { value = false }
+  local gen = generation
   tracked[path] = { buf_id = b, applying = applying }
 
   vim.api.nvim_buf_attach(b, false, {
     on_lines = function(_, buf, _, firstline, lastline, new_lastline)
+      -- The session this attachment belongs to has ended (:LiveShareStop) or
+      -- has been superseded by a later one.  Return true to detach, so the
+      -- host keeps editing normally instead of hitting a nil `conn`, and so a
+      -- restarted session does not broadcast every patch twice.
+      if gen ~= generation or not conn then
+        return true
+      end
       if applying.value then
         return
       end
@@ -100,7 +115,13 @@ local function attach_buffer(b)
       })
     end,
     on_detach = function()
-      tracked[path] = nil
+      -- Only drop the entry if it is still the one this attachment created.
+      -- After a stop/start cycle a stale attachment detaches itself while a
+      -- fresh one already owns tracked[path]; clearing blindly would untrack
+      -- a buffer the live session is still sharing.
+      if tracked[path] and tracked[path].applying == applying then
+        tracked[path] = nil
+      end
     end,
   })
 
@@ -519,6 +540,8 @@ function M.start(port)
 end
 
 function M.stop()
+  -- Retires every buffer attachment made by this session (see `generation`).
+  generation = generation + 1
   vim.api.nvim_clear_autocmds({ group = host_aug })
   vim.api.nvim_clear_autocmds({ group = cursor_aug })
   if cursor_timer then

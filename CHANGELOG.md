@@ -26,6 +26,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   collaboration with VS Code via [open-pair](https://github.com/darkerthanblack2000/open-pair)
   is now highlighted in the overview rather than buried in a footnote.
 
+### Fixed
+- **Editing a buffer after `:LiveShareStop` no longer raises
+  `attempt to index upvalue 'conn' (a nil value)`.** `nvim_buf_attach`
+  callbacks are not autocmds: `M.stop()` cleared the `LiveShareHost` augroup
+  and set `conn = nil`, but the per-buffer `on_lines` watcher survived and
+  still tried to broadcast the next local edit, so the host's editing session
+  was broken until Neovim restarted. Attachments now capture a session
+  generation counter (bumped by `M.stop()`) and retire themselves by returning
+  `true` on their first invocation after the session ends. This also fixes a
+  latent duplicate-broadcast bug: a `stop` → `start` cycle previously left the
+  old attachment live alongside the new one, sending every patch twice and
+  double-incrementing `seq`. `on_detach` is now guarded so the retiring stale
+  attachment cannot untrack a buffer the restarted session still shares.
+  Tests: `tests/host/lifecycle_spec.lua`.
+
 ---
 
 ## [2.1.4] — 2026-04-24 (current)
