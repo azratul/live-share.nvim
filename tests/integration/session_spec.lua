@@ -32,23 +32,31 @@ local function raw_tcp_peer(port, key)
   local tcp = uv.new_tcp()
 
   tcp:connect("127.0.0.1", port, function(err)
-    if err then return end
+    if err then
+      return
+    end
     tcp:write("\x00\x00\x00\x00")
     local reader = tcp_trans.new_reader()
     tcp:read_start(function(rerr, data)
-      if rerr or not data then return end
+      if rerr or not data then
+        return
+      end
       local payloads = reader(data)
       vim.schedule(function()
         for _, payload in ipairs(payloads) do
           local msg = protocol.decode(payload, key)
-          if msg then table.insert(peer.msgs, msg) end
+          if msg then
+            table.insert(peer.msgs, msg)
+          end
         end
       end)
     end)
   end)
 
   function peer:stop()
-    if not tcp:is_closing() then tcp:close() end
+    if not tcp:is_closing() then
+      tcp:close()
+    end
   end
 
   return peer
@@ -60,7 +68,9 @@ local function raw_ws_peer(port, key)
   local tcp = uv.new_tcp()
 
   tcp:connect("127.0.0.1", port, function(err)
-    if err then return end
+    if err then
+      return
+    end
     local upgrade_req = ws_trans.client_upgrade("127.0.0.1")
     local state = "handshaking"
     local hs_buf = ""
@@ -71,20 +81,31 @@ local function raw_ws_peer(port, key)
       vim.schedule(function()
         for _, payload in ipairs(payloads) do
           local msg = protocol.decode(payload, key)
-          if msg then table.insert(peer.msgs, msg) end
+          if msg then
+            table.insert(peer.msgs, msg)
+          end
         end
       end)
     end
 
     tcp:read_start(function(rerr, data)
-      if rerr or not data then return end
+      if rerr or not data then
+        return
+      end
       if state == "handshaking" then
         hs_buf = hs_buf .. data
         local ok, rest = ws_trans.complete_client_handshake(hs_buf)
-        if ok == nil then return end
-        if not ok then tcp:close(); return end
+        if ok == nil then
+          return
+        end
+        if not ok then
+          tcp:close()
+          return
+        end
         state = "connected"
-        if rest and #rest > 0 then process_frames(rest) end
+        if rest and #rest > 0 then
+          process_frames(rest)
+        end
       else
         process_frames(data)
       end
@@ -94,7 +115,9 @@ local function raw_ws_peer(port, key)
   end)
 
   function peer:stop()
-    if not tcp:is_closing() then tcp:close() end
+    if not tcp:is_closing() then
+      tcp:close()
+    end
   end
 
   return peer
@@ -119,7 +142,9 @@ describe("WebSocket mode integration", function()
     client.connect("127.0.0.1", BASE_PORT, nil, "ws", 0, nil)
 
     assert.is_true(
-      wait_for(function() return received ~= nil end),
+      wait_for(function()
+        return received ~= nil
+      end),
       "timed out — server never received connect event in WS mode"
     )
     assert.equals("connect", received.msg.t)
@@ -137,11 +162,15 @@ describe("WebSocket mode integration", function()
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 1, nil), "server failed to bind")
 
-    client.setup(function(msg) client_received = msg end)
+    client.setup(function(msg)
+      client_received = msg
+    end)
     client.connect("127.0.0.1", BASE_PORT + 1, nil, "ws", 0, nil)
 
     assert.is_true(
-      wait_for(function() return client_received ~= nil end),
+      wait_for(function()
+        return client_received ~= nil
+      end),
       "timed out — client never received hello in WS mode"
     )
     assert.equals("hello", client_received.t)
@@ -173,11 +202,15 @@ describe("Encrypted mode integration", function()
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 2, key), "server failed to bind")
 
-    client.setup(function(msg) client_received = msg end)
+    client.setup(function(msg)
+      client_received = msg
+    end)
     client.connect("127.0.0.1", BASE_PORT + 2, key, "tcp", 0, nil)
 
     assert.is_true(
-      wait_for(function() return client_received ~= nil end),
+      wait_for(function()
+        return client_received ~= nil
+      end),
       "timed out — encrypted client never received hello"
     )
     assert.equals("hello", client_received.t)
@@ -196,11 +229,15 @@ describe("Encrypted mode integration", function()
     end)
     assert.is_true(server.start("127.0.0.1", BASE_PORT + 3, key), "server failed to bind")
 
-    client.setup(function(msg) client_received = msg end)
+    client.setup(function(msg)
+      client_received = msg
+    end)
     client.connect("127.0.0.1", BASE_PORT + 3, key, "ws", 0, nil)
 
     assert.is_true(
-      wait_for(function() return client_received ~= nil end),
+      wait_for(function()
+        return client_received ~= nil
+      end),
       "timed out — encrypted WS client never received hello"
     )
     assert.equals("hello", client_received.t)
@@ -213,7 +250,9 @@ describe("Broadcast integration", function()
   local peers = {}
 
   after_each(function()
-    for _, p in ipairs(peers) do p:stop() end
+    for _, p in ipairs(peers) do
+      p:stop()
+    end
     peers = {}
     server.stop()
   end)
@@ -239,13 +278,17 @@ describe("Broadcast integration", function()
 
     local function got_patch(peer)
       for _, m in ipairs(peer.msgs) do
-        if m.t == "patch" then return true end
+        if m.t == "patch" then
+          return true
+        end
       end
       return false
     end
 
     assert.is_true(
-      wait_for(function() return got_patch(p1) and got_patch(p2) end),
+      wait_for(function()
+        return got_patch(p1) and got_patch(p2)
+      end),
       "timed out — not all peers received the broadcast"
     )
     assert.equals("broadcast", p1.msgs[#p1.msgs].lines[1])
@@ -273,13 +316,17 @@ describe("Broadcast integration", function()
 
     local function got_patch(peer)
       for _, m in ipairs(peer.msgs) do
-        if m.t == "patch" then return true end
+        if m.t == "patch" then
+          return true
+        end
       end
       return false
     end
 
     assert.is_true(
-      wait_for(function() return got_patch(tcp_peer) and got_patch(ws_peer) end),
+      wait_for(function()
+        return got_patch(tcp_peer) and got_patch(ws_peer)
+      end),
       "timed out — TCP+WS broadcast did not reach both peers"
     )
     assert.equals("mixed-broadcast", tcp_peer.msgs[#tcp_peer.msgs].lines[1])

@@ -164,9 +164,12 @@ describe("Abrupt disconnect", function()
       "timed out — witness peer never received the synthesized bye broadcast"
     )
 
-    assert.equals("bob", find_msg(p2.msgs, function(m)
-      return m.t == "bye"
-    end).name)
+    assert.equals(
+      "bob",
+      find_msg(p2.msgs, function(m)
+        return m.t == "bye"
+      end).name
+    )
 
     p2:stop()
   end)
@@ -274,10 +277,7 @@ describe("Broadcast except_peer exclusion", function()
         table.insert(peer_ids, peer_id)
         server.approve(peer_id)
         if connected == 2 then
-          server.broadcast(
-            { t = "patch", path = "x.lua", lnum = 0, count = 0, lines = { "exclusive" } },
-            peer_ids[1]
-          )
+          server.broadcast({ t = "patch", path = "x.lua", lnum = 0, count = 0, lines = { "exclusive" } }, peer_ids[1])
         end
       end
     end)
