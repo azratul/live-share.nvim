@@ -8,15 +8,29 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Publish GitHub Release
+  # A tag push does not run ci.yml, and nothing about a tag says the commit ever
+  # reached main.  Both are checked here before anything is published.
+  verify:
+    name: Verify the tagged commit
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main. Push main first, then the tag."
+            exit 1
+          fi
 
       - name: Check the plugin version matches the tag
         run: |
@@ -26,9 +40,49 @@ jobs:
             exit 1
           fi
 
+      - name: Check the CHANGELOG has a section for this version
+        run: scripts/changelog-section.sh "${{ steps.version.outputs.version }}"
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install StyLua
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua/ plugin/
+
+      - name: Install Neovim (stable)
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Install plenary.nvim
+        run: |
+          git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
+            ~/.local/share/nvim/site/pack/vendor/start/plenary.nvim
+
+      - name: Run tests
+        run: |
+          nvim --headless \
+            -u tests/minimal_init.lua \
+            -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"
+
+  release:
+    name: Publish GitHub Release
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Extract release notes from CHANGELOG.md
         run: |
-          scripts/changelog-section.sh "${{ steps.version.outputs.version }}" | tee release-notes.md
+          scripts/changelog-section.sh "${{ needs.verify.outputs.version }}" | tee release-notes.md
 
       - name: Create the release
         env:
