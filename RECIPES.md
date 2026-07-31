@@ -123,7 +123,11 @@ require("live-share.provider").register("bore", {
   command = function(_, port, service_url)
     return string.format("bore local %d --to bore.pub > %s 2>&1", port, service_url)
   end,
-  pattern = "bore%.pub:%d+",
+  -- Anchored to bore's success line ("listening at bore.pub:41287") and
+  -- capturing only the address.  An unanchored "bore%.pub:%d+" would also match
+  -- the failure line ("could not connect to bore.pub:7835") and turn bore's
+  -- control port into a share URL that no tunnel ever answered.
+  pattern = "listening at (bore%.pub:%d+)",
 })
 require("live-share").setup({ service = "bore" })
 ```
@@ -235,7 +239,9 @@ require("live-share.provider").register("my-bore", {
       "bore local %d --to vps.example.com --secret your-shared-secret > %s 2>&1",
       port_internal, service_url)
   end,
-  pattern = "vps%.example%.com:%d+",
+  -- Anchored to bore's success line, so its failure output cannot be scraped
+  -- as a share URL (see §4).
+  pattern = "listening at (vps%.example%.com:%d+)",
 })
 
 require("live-share").setup({

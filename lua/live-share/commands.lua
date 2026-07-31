@@ -211,7 +211,7 @@ function M.debug_info()
   local session = require("live-share.session")
 
   -- Plugin / protocol
-  lines[#lines + 1] = "plugin version : 2.1.5"
+  lines[#lines + 1] = "plugin version : 2.1.6"
   lines[#lines + 1] = "protocol version: " .. tostring(protocol.VERSION)
 
   -- Neovim

@@ -257,11 +257,15 @@ require("live-share.provider").register("bore", {
       "bore local %d --to bore.pub > %s 2>&1",
       port, service_url)
   end,
-  pattern = "bore%.pub:%d+",
+  -- Anchor the pattern to the provider's success line and capture just the
+  -- address: an unanchored pattern can match the provider's *error* output.
+  pattern = "listening at (bore%.pub:%d+)",
 })
 
 require("live-share").setup({ service = "bore" })
 ```
+
+> **Writing a `pattern`.** The first match in the scraped output becomes the share URL; if the pattern has a capture group, the capture is used. Anchor it to the text the provider prints on success — a loose pattern can match the provider's error output and produce a URL for a tunnel that was never established. If the tunnel process exits non-zero, or nothing matches within `max_attempts`, the session reports an error and no URL is published.
 
 > **Privacy-first option.** You can self-host the tunnel on your own VPS (any SSH server with `GatewayPorts`, or `bore server`) so no third-party ever sees your encrypted traffic. With the `punch` transport this also gives you a self-hosted signaling and relay server "for free", since both ride on top of the chosen tunnel. See [RECIPES.md §6](./RECIPES.md#6-self-hosted-relay-privacy-first).
 

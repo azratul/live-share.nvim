@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the plugin version matches the tag
+        run: |
+          declared=$(sed -n 's/.*plugin version : \([0-9][0-9.]*\).*/\1/p' lua/live-share/commands.lua)
+          if [ "$declared" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::lua/live-share/commands.lua says '$declared' but the tag is '${{ steps.version.outputs.version }}'"
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          scripts/changelog-section.sh "${{ steps.version.outputs.version }}" | tee release-notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md

@@ -6,11 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [2.1.6] — 2026-07-31 (current)
+
+### Fixed
+- **A failed tunnel is no longer scraped as a valid share URL.** Nothing checked
+  the tunnel process's exit status, and any match of the provider `pattern`
+  counted as success — so a provider that wrote its *error* output to the
+  service URL file could have that error parsed into a share URL, copied to the
+  clipboard, and announced with the usual success message. The documented `bore`
+  recipe hit this: it redirects stderr into the scraped file, and
+  `could not connect to bore.pub:7835` (bore's control port, which is never
+  assigned as a tunnel port) satisfies the `bore%.pub:%d+` pattern. The result
+  was a quiet failure — the control port accepts connections and stays silent,
+  so guests hung until their own timeout instead of failing fast. The tunnel now
+  reports an error and publishes nothing when the process exits non-zero before
+  announcing a URL, and quotes the provider's own error line in the message.
+- **The URL poll timer now always gives up.** `max_attempts` was only consulted
+  for a missing or empty service URL file, so output that never matched the
+  provider pattern left a 250 ms timer polling for the rest of the Neovim
+  session without ever reporting anything.
+  Tests: `tests/tunnel/failure_spec.lua`.
+
+### Changed
+- **`bore` provider recipes anchored to the success line** in `README.md` and
+  `RECIPES.md` — `pattern = "listening at (bore%.pub:%d+)"` instead of
+  `"bore%.pub:%d+"`, so the address can only come from where bore announces it.
+  Documented that `pattern` may use a capture group, and that a loose pattern
+  can match a provider's error output.
 
 ---
 
-## [2.1.5] — 2026-07-28 (current)
+## [2.1.5] — 2026-07-28
 
 ### Added
 - **`RECIPES.md`** — practical walkthroughs for the seven most common workflows:
