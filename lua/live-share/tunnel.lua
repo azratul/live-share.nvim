@@ -102,8 +102,14 @@ function M.start(port, opts)
       raw_command = raw_command:gsub("^ssh", "ssh -n")
     end
 
-    command =
-      string.format('( %s 2>/dev/null ) | while read line; do echo "$line" >> "%s"; done', raw_command, service_url)
+    -- `pipefail` is required for failure detection: without it the pipeline
+    -- reports the exit status of the `while` loop, which is 0 even when the
+    -- tunnel died, so on_exit would treat every failure as a clean exit.
+    command = string.format(
+      'set -o pipefail; ( %s 2>/dev/null ) | while read line; do echo "$line" >> "%s"; done',
+      raw_command,
+      service_url
+    )
 
     job_opts = { "bash", "-c", command }
   else

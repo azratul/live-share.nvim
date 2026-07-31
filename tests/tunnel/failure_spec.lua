@@ -17,7 +17,18 @@
 local provider = require("live-share.provider")
 local tunnel = require("live-share.tunnel")
 
+local is_win = package.config:sub(1, 1) == "\\"
+
 describe("tunnel failure reporting", function()
+  -- On Windows tunnel.lua takes a different path: it creates the service URL
+  -- file itself and wraps the provider command in a bash pipeline that appends
+  -- to it.  These fixtures are POSIX shell writing to a POSIX path, so they do
+  -- not survive that wrapping.  The pattern checks below still run everywhere.
+  if is_win then
+    pending("process-driven tunnel tests are POSIX-only")
+    return
+  end
+
   local errors, outs, url_file, restore_api
 
   -- Capture what the user would actually see.

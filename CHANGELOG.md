@@ -25,7 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   for a missing or empty service URL file, so output that never matched the
   provider pattern left a 250 ms timer polling for the rest of the Neovim
   session without ever reporting anything.
-  Tests: `tests/tunnel/failure_spec.lua`.
+- **Tunnel exit status is now visible on Windows.** There the provider command
+  runs inside a `bash` pipeline that appends its output to the service URL file,
+  and a pipeline reports the exit status of its *last* command — the `while`
+  loop, which always succeeds. `set -o pipefail` makes the tunnel's own failure
+  propagate, so the checks above apply on Windows too.
+  Tests: `tests/tunnel/failure_spec.lua` (the process-driven cases are POSIX-only;
+  the pattern checks run everywhere).
 
 ### Changed
 - **`bore` provider recipes anchored to the success line** in `README.md` and
