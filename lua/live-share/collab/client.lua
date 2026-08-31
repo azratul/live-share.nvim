@@ -41,8 +41,26 @@ local function dispatch_payloads(payloads)
   end
 end
 
-local function do_connect(ip, port, key, host, mode, attempt, on_error)
-  dbg("connecting to " .. ip .. ":" .. tostring(port) .. " mode=" .. mode .. " (attempt " .. attempt .. ")")
+-- Connects to addrs[idx]. On failure it walks the remaining resolved addresses
+-- before counting a retry, so a host that resolves to ::1 first still falls back
+-- to 127.0.0.1 (and multi-A records get tried in resolver order).
+local function do_connect(addrs, idx, port, key, host, mode, attempt, on_error)
+  local ip = addrs[idx]
+  dbg(
+    "connecting to "
+      .. ip
+      .. ":"
+      .. tostring(port)
+      .. " mode="
+      .. mode
+      .. " (attempt "
+      .. attempt
+      .. ", address "
+      .. idx
+      .. "/"
+      .. #addrs
+      .. ")"
+  )
 
   local tcp = uv.new_tcp()
   conn = tcp
@@ -55,13 +73,18 @@ local function do_connect(ip, port, key, host, mode, attempt, on_error)
         conn = nil
       end
 
-      if attempt < 3 then
+      if idx < #addrs then
+        -- Still have resolved addresses left: try the next one immediately.
+        vim.schedule(function()
+          do_connect(addrs, idx + 1, port, key, host, mode, attempt, on_error)
+        end)
+      elseif attempt < 3 then
         local delay = (2 ^ attempt) * 500
         local t = uv.new_timer()
         t:start(delay, 0, function()
           t:close()
           vim.schedule(function()
-            M.connect(host, port, key, mode, attempt + 1, on_error)
+            do_connect(addrs, 1, port, key, host, mode, attempt + 1, on_error)
           end)
         end)
       else
@@ -180,19 +203,37 @@ function M.connect(host, port, key, mode, attempt, on_error)
   mode = mode or "ws"
   session_key = key
 
+  local function resolve_failed(err)
+    vim.schedule(function()
+      vim.api.nvim_err_writeln("live-share: could not resolve host '" .. host .. "': " .. tostring(err))
+      if on_error then
+        on_error()
+      end
+    end)
+  end
+
   dbg("resolving " .. host)
   uv.getaddrinfo(host, nil, { socktype = "stream" }, function(err, res)
     if err or not res or #res == 0 then
-      vim.schedule(function()
-        vim.api.nvim_err_writeln("live-share: could not resolve host '" .. host .. "': " .. tostring(err))
-        if on_error then
-          on_error()
-        end
-      end)
+      resolve_failed(err)
       return
     end
-    dbg("resolved " .. host .. " -> " .. res[1].addr)
-    do_connect(res[1].addr, port, key, host, mode, attempt, on_error)
+
+    -- Keep every address the resolver returned, de-duplicated and in its order.
+    local addrs, seen = {}, {}
+    for _, r in ipairs(res) do
+      if r.addr and not seen[r.addr] then
+        seen[r.addr] = true
+        addrs[#addrs + 1] = r.addr
+      end
+    end
+    if #addrs == 0 then
+      resolve_failed("no usable address")
+      return
+    end
+
+    dbg("resolved " .. host .. " -> " .. table.concat(addrs, ", "))
+    do_connect(addrs, 1, port, key, host, mode, attempt, on_error)
   end)
 end
 
