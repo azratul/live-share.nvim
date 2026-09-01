@@ -147,23 +147,34 @@ function M.server_response(ws_key)
   }, "\r\n")
 end
 
+-- ── Opcodes (RFC 6455 §5.2) ─────────────────────────────────────────────────
+
+M.OP_CONT = 0x0
+M.OP_TEXT = 0x1
+M.OP_BIN = 0x2
+M.OP_CLOSE = 0x8
+M.OP_PING = 0x9
+M.OP_PONG = 0xA
+
 -- ── Frame encode ────────────────────────────────────────────────────────────
 
--- Encode a binary WebSocket frame.
+-- Encode a single (FIN=1) WebSocket frame.
 --   masked = true  → client→server (RFC 6455 §5.3 requires masking)
 --   masked = false → server→client
-function M.encode_frame(payload, masked)
+--   opcode         → defaults to binary; pass OP_PONG/OP_CLOSE for control frames
+function M.encode_frame(payload, masked, opcode)
   local len = #payload
   local b2base = masked and 0x80 or 0x00
+  local b1 = 0x80 + (opcode or M.OP_BIN) -- FIN=1
 
   local header
   if len < 126 then
-    header = string.char(0x82, b2base + len)
+    header = string.char(b1, b2base + len)
   elseif len < 65536 then
-    header = string.char(0x82, b2base + 126, math.floor(len / 256), len % 256)
+    header = string.char(b1, b2base + 126, math.floor(len / 256), len % 256)
   else
     header = string.char(
-      0x82,
+      b1,
       b2base + 127,
       0,
       0,
@@ -190,10 +201,32 @@ end
 
 -- ── Frame decode ────────────────────────────────────────────────────────────
 
--- Returns a stateful decoder that handles TCP fragmentation.
--- Call fn(chunk) → list of binary payloads extracted from complete WS frames.
-function M.new_frame_reader()
+-- Hard ceiling for a reassembled message. connection.lua documents 10 MB as the
+-- maximum recommended message size; anything past this is a broken or hostile
+-- peer, and buffering it unbounded would be a trivial way to exhaust memory.
+local MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+
+-- Returns a stateful decoder that handles both TCP fragmentation and WebSocket
+-- message fragmentation (RFC 6455 §5.4): a message may arrive as a data frame
+-- with FIN=0 followed by continuation frames (opcode 0x0), the last with FIN=1.
+-- HTTP reverse-proxy tunnels re-frame large messages this way, so a reader that
+-- ignores FIN silently loses everything after the first fragment.
+--
+-- opts.on_control — fn(opcode, payload) for ping/pong/close frames. The caller
+-- owns the socket, so it is responsible for writing the pong or closing.
+--
+-- Call fn(chunk) → list of complete binary messages.
+function M.new_frame_reader(opts)
+  opts = opts or {}
+  local on_control = opts.on_control
   local buf = ""
+  local frag_parts = nil -- non-nil while a fragmented message is in flight
+  local frag_len = 0
+
+  local function reset_fragments()
+    frag_parts = nil
+    frag_len = 0
+  end
 
   return function(data)
     buf = buf .. data
@@ -205,6 +238,7 @@ function M.new_frame_reader()
       end
 
       local b1, b2 = buf:byte(1), buf:byte(2)
+      local fin = band(b1, 0x80) ~= 0
       local opcode = band(b1, 0x0F)
       local masked = band(b2, 0x80) ~= 0
       local plen7 = band(b2, 0x7F)
@@ -244,8 +278,35 @@ function M.new_frame_reader()
 
       buf = buf:sub(hdr_size + plen + 1)
 
-      if opcode == 1 or opcode == 2 then -- text or binary
-        table.insert(payloads, payload)
+      if opcode >= M.OP_CLOSE then
+        -- Control frames are never fragmented and may be interleaved inside a
+        -- fragmented message, so they must not disturb the reassembly state.
+        if on_control then
+          on_control(opcode, payload)
+        end
+      elseif opcode == M.OP_CONT then
+        if frag_parts then
+          frag_len = frag_len + plen
+          if frag_len > MAX_MESSAGE_BYTES then
+            reset_fragments() -- oversized message: drop it, stay in sync
+          else
+            frag_parts[#frag_parts + 1] = payload
+            if fin then
+              table.insert(payloads, table.concat(frag_parts))
+              reset_fragments()
+            end
+          end
+        end
+        -- A continuation with nothing in flight is a protocol error; skip it.
+      elseif opcode == M.OP_TEXT or opcode == M.OP_BIN then
+        if fin then
+          table.insert(payloads, payload)
+        else
+          -- Start of a fragmented message (a new one also abandons any partial
+          -- message left behind by a misbehaving peer).
+          frag_parts = { payload }
+          frag_len = plen
+        end
       end
     end
 

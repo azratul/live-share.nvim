@@ -36,6 +36,20 @@ function M.frame_client(payload)
   return ws.encode_frame(payload, true)
 end
 
+-- Control frames. A proxy that keeps the tunnel alive with pings will drop a
+-- connection that never pongs back, so both ends must answer.
+function M.pong(payload)
+  return ws.encode_frame(payload, false, ws.OP_PONG)
+end
+
+function M.pong_client(payload)
+  return ws.encode_frame(payload, true, ws.OP_PONG)
+end
+
+M.OP_PING = ws.OP_PING
+M.OP_CLOSE = ws.OP_CLOSE
+
+-- new_reader([opts]) — opts.on_control = fn(opcode, payload)
 M.new_reader = ws.new_frame_reader
 
 -- ── Server-side handshake ─────────────────────────────────────────────────────

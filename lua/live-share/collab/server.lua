@@ -126,6 +126,14 @@ function M.start(ip, port, key)
         local msg = protocol.decode(payload, session_key)
         if msg then
           dispatch(msg)
+        else
+          dbg(
+            "peer "
+              .. peer_id
+              .. ": dropped an undecodable payload ("
+              .. #payload
+              .. " bytes) — truncated frame or wrong key?"
+          )
         end
       end
     end
@@ -173,7 +181,20 @@ function M.start(ip, port, key)
         end
         if buf:sub(1, 4) == "GET " then
           state = "ws_hs"
-          reader = ws_trans.new_reader()
+          reader = ws_trans.new_reader({
+            on_control = function(opcode, payload)
+              if conn:is_closing() then
+                return
+              end
+              if opcode == ws_trans.OP_PING then
+                dbg("peer " .. peer_id .. " ping — replying pong")
+                conn:write(ws_trans.pong(payload))
+              elseif opcode == ws_trans.OP_CLOSE then
+                dbg("peer " .. peer_id .. " sent close frame")
+                conn:close()
+              end
+            end,
+          })
           dbg("peer " .. peer_id .. " → WebSocket mode")
           -- fall through to ws_hs handling below
         else

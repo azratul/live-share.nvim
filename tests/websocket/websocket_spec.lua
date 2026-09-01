@@ -174,4 +174,137 @@ describe("websocket", function()
       assert.equals(payload, reader2(f2)[1])
     end)
   end)
+
+  -- Regression tests for #25: a reader that ignores the FIN bit keeps only the
+  -- first fragment of a message re-framed by an HTTP reverse-proxy tunnel.
+  describe("message fragmentation (continuation frames, RFC 6455 §5.4)", function()
+    -- Builds a raw frame with an explicit FIN bit and opcode (unmasked).
+    local function raw_frame(payload, fin, opcode)
+      local b1 = (fin and 0x80 or 0x00) + opcode
+      local len = #payload
+      if len < 126 then
+        return string.char(b1, len) .. payload
+      elseif len < 65536 then
+        return string.char(b1, 126, math.floor(len / 256), len % 256) .. payload
+      end
+      error("test helper only covers payloads < 64 KiB")
+    end
+
+    it("reassembles a message split into continuation frames", function()
+      local stream = raw_frame("hello ", false, ws.OP_BIN)
+        .. raw_frame("frag", false, ws.OP_CONT)
+        .. raw_frame("mented world", true, ws.OP_CONT)
+      local reader = ws.new_frame_reader()
+      local payloads = reader(stream)
+      assert.equals(1, #payloads)
+      assert.equals("hello fragmented world", payloads[1])
+    end)
+
+    it("reassembles a large fragmented message delivered in odd-sized chunks", function()
+      local part = string.rep("x", 8192)
+      local stream = raw_frame(part, false, ws.OP_BIN)
+        .. raw_frame(part, false, ws.OP_CONT)
+        .. raw_frame(part, true, ws.OP_CONT)
+      local reader = ws.new_frame_reader()
+      local all = {}
+      for i = 1, #stream, 777 do
+        for _, p in ipairs(reader(stream:sub(i, i + 776))) do
+          table.insert(all, p)
+        end
+      end
+      assert.equals(1, #all)
+      assert.equals(3 * 8192, #all[1])
+      assert.equals(string.rep("x", 3 * 8192), all[1])
+    end)
+
+    it("emits nothing until the final fragment arrives", function()
+      local reader = ws.new_frame_reader()
+      assert.equals(0, #reader(raw_frame("part one", false, ws.OP_BIN)))
+      assert.equals(0, #reader(raw_frame("part two", false, ws.OP_CONT)))
+      local payloads = reader(raw_frame("!", true, ws.OP_CONT))
+      assert.equals(1, #payloads)
+      assert.equals("part onepart two!", payloads[1])
+    end)
+
+    it("keeps unfragmented frames working alongside fragmented ones", function()
+      local stream = raw_frame("solo", true, ws.OP_BIN)
+        .. raw_frame("a", false, ws.OP_BIN)
+        .. raw_frame("b", true, ws.OP_CONT)
+        .. raw_frame("again", true, ws.OP_BIN)
+      local payloads = ws.new_frame_reader()(stream)
+      assert.same({ "solo", "ab", "again" }, payloads)
+    end)
+
+    it("ignores a stray continuation frame with no message in flight", function()
+      local stream = raw_frame("orphan", true, ws.OP_CONT) .. raw_frame("real", true, ws.OP_BIN)
+      local payloads = ws.new_frame_reader()(stream)
+      assert.same({ "real" }, payloads)
+    end)
+  end)
+
+  describe("control frames", function()
+    local function raw_frame(payload, fin, opcode)
+      local b1 = (fin and 0x80 or 0x00) + opcode
+      return string.char(b1, #payload) .. payload
+    end
+
+    it("reports a ping to on_control instead of treating it as a message", function()
+      local seen = {}
+      local reader = ws.new_frame_reader({
+        on_control = function(opcode, payload)
+          table.insert(seen, { opcode = opcode, payload = payload })
+        end,
+      })
+      local payloads = reader(raw_frame("keepalive", true, ws.OP_PING))
+      assert.equals(0, #payloads)
+      assert.equals(1, #seen)
+      assert.equals(ws.OP_PING, seen[1].opcode)
+      assert.equals("keepalive", seen[1].payload)
+    end)
+
+    it("reports a close frame to on_control", function()
+      local seen = nil
+      local reader = ws.new_frame_reader({
+        on_control = function(opcode)
+          seen = opcode
+        end,
+      })
+      reader(raw_frame("", true, ws.OP_CLOSE))
+      assert.equals(ws.OP_CLOSE, seen)
+    end)
+
+    it("does not break reassembly when a ping is interleaved mid-message", function()
+      local stream = raw_frame("before", false, ws.OP_BIN)
+        .. raw_frame("ping!", true, ws.OP_PING)
+        .. raw_frame("after", true, ws.OP_CONT)
+      local pings = 0
+      local reader = ws.new_frame_reader({
+        on_control = function(opcode)
+          if opcode == ws.OP_PING then
+            pings = pings + 1
+          end
+        end,
+      })
+      local payloads = reader(stream)
+      assert.equals(1, pings)
+      assert.same({ "beforeafter" }, payloads)
+    end)
+
+    it("encodes a pong that decodes back as a control frame", function()
+      local seen = nil
+      local reader = ws.new_frame_reader({
+        on_control = function(opcode, payload)
+          seen = { opcode = opcode, payload = payload }
+        end,
+      })
+      reader(ws.encode_frame("abc", false, ws.OP_PONG))
+      assert.equals(ws.OP_PONG, seen.opcode)
+      assert.equals("abc", seen.payload)
+    end)
+
+    it("still defaults to a binary opcode when none is given", function()
+      local frame = ws.encode_frame("x", false)
+      assert.equals(0x80 + ws.OP_BIN, frame:byte(1))
+    end)
+  end)
 end)

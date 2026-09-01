@@ -37,6 +37,10 @@ local function dispatch_payloads(payloads)
       if on_message then
         on_message(msg)
       end
+    else
+      -- Never drop this silently: a truncated frame or a wrong session key looks
+      -- exactly like a message that was never sent, which is unbearable to debug.
+      dbg("dropped an undecodable payload (" .. #payload .. " bytes) — truncated frame or wrong key?")
     end
   end
 end
@@ -139,7 +143,20 @@ local function do_connect(addrs, idx, port, key, host, mode, attempt, on_error)
       local upgrade_req, _ws_key = ws_trans.client_upgrade(host)
       local state = "handshaking"
       local hs_buf = ""
-      local frame_reader = ws_trans.new_reader()
+      local frame_reader = ws_trans.new_reader({
+        on_control = function(opcode, payload)
+          if tcp:is_closing() then
+            return
+          end
+          if opcode == ws_trans.OP_PING then
+            dbg("ping received — replying pong")
+            tcp:write(ws_trans.pong_client(payload))
+          elseif opcode == ws_trans.OP_CLOSE then
+            dbg("close frame received from server")
+            tcp:close()
+          end
+        end,
+      })
 
       local function process_ws(data)
         local payloads = frame_reader(data)
