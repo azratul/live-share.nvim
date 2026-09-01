@@ -1,4 +1,4 @@
-# Live-Share.nvim Protocol Specification (v1.2.0)
+# Live-Share.nvim Protocol Specification (v1.3.0)
 
 This document describes the communication protocol used by `live-share.nvim`. It is designed to allow developers to implement compatible plugins for other editors.
 
@@ -199,7 +199,7 @@ Resolution flow for concurrent edits to the same line:
 
 ## 4. Protocol Versioning
 
-> **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.2.0` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
+> **Note:** `protocol_version` (the integer in `hello`) is the **wire compatibility version** — the only value implementors need to care about. The `v1.3.0` in this document's title is the spec document version and is independent; it tracks editorial changes (clarifications, new sections) that do not affect the wire format.
 
 The `hello` message carries a `protocol_version` integer field. Clients **should** warn the user if the received version differs from their own. The current version is **3**.
 
@@ -534,7 +534,10 @@ A guest client moves through the following states after initiating a connection.
 **Notes on WORKSPACE_SYNC:**
 - `workspace_info`, `peers_snapshot` (optional), and `open_files_snapshot` all arrive in this window, in that order.
 - The client should buffer but not yet display any `patch` or `cursor` messages that arrive before `open_files_snapshot` is processed — apply them immediately after the snapshot is committed.
-- If no `open_files_snapshot` is received within a reasonable timeout (suggested: 10 s), the client should disconnect and surface an error.
+- The client should guard this window with an **idle** timeout (suggested: 10 s without any inbound data), not a fixed deadline
+  measured from `hello`. `open_files_snapshot` carries the full content of every open buffer as one message, so on a slow relay it
+  can take minutes to arrive over a perfectly healthy link; a fixed deadline drops those sessions while the data is still in flight.
+  If the connection goes quiet for the timeout, the client should disconnect and surface an error.
 
 **Notes on ACTIVE:**
 - `file_request` / `file_response` may be used at any time during ACTIVE.
@@ -671,7 +674,7 @@ When a breaking protocol change ships:
 
 ### `file_request` response timeout
 
-`file_request` is a fire-and-forget message — the guest sends it once and waits for the matching `file_response` or `error`. There is no retry mechanism. If no response arrives within 10 seconds, the guest should treat the silence as a connection error and transition to TERMINAL state.
+`file_request` is a fire-and-forget message — the guest sends it once and waits for the matching `file_response` or `error`. There is no retry mechanism. As with WORKSPACE_SYNC (§8), the guest should guard the wait with an **idle** timeout (suggested: 10 s without any inbound data) rather than a fixed deadline: `file_response` carries the full content of a file and can take far longer than that to arrive over a slow relay. If the connection goes quiet for the timeout, the guest should treat the silence as a connection error and transition to TERMINAL state.
 
 ### Terminal input encoding
 

@@ -26,6 +26,8 @@
 --     opts.key    — 32-byte session key, or nil for plaintext
 --     opts.mode   — "ws" | "tcp"
 --     opts.on_msg — fn(msg)  called for every decoded inbound message
+--     opts.on_activity — fn()  optional; fires per inbound chunk before decoding, to
+--                        tell "link alive" from "message delivered". Not for punch.
 --
 --   conn:connect(host, port [, on_error])
 --   conn:send(msg)
@@ -85,7 +87,7 @@ end
 -- ── Connector ────────────────────────────────────────────────────────────────
 
 function M.new_connector(opts)
-  client.setup(opts.on_msg)
+  client.setup(opts.on_msg, opts.on_activity)
 
   local self = {}
 

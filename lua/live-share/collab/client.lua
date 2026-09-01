@@ -18,6 +18,7 @@ local uv = vim.uv or vim.loop
 
 local conn = nil
 local on_message = nil
+local on_activity = nil
 local session_key = nil
 local send_frame = nil -- fn(payload) → framed bytes; set at connect time
 
@@ -25,8 +26,18 @@ local function dbg(msg)
   log.dbg("client", msg)
 end
 
-function M.setup(cb)
+-- Fires per inbound chunk, before decoding: a multi-megabyte message delivers
+-- nothing for tens of seconds, so bytes are the only usable liveness signal.
+local function note_activity()
+  if on_activity then
+    on_activity()
+  end
+end
+
+-- activity_cb is optional; see note_activity above.
+function M.setup(cb, activity_cb)
   on_message = cb
+  on_activity = activity_cb
 end
 
 local function dispatch_payloads(payloads)
@@ -131,6 +142,7 @@ local function do_connect(addrs, idx, port, key, host, mode, attempt, on_error)
           on_disconnect(read_err)
           return
         end
+        note_activity()
         local payloads = reader(data)
         vim.schedule(function()
           dispatch_payloads(payloads)
@@ -170,6 +182,7 @@ local function do_connect(addrs, idx, port, key, host, mode, attempt, on_error)
           on_disconnect(read_err)
           return
         end
+        note_activity()
 
         if state == "handshaking" then
           hs_buf = hs_buf .. data

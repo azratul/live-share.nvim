@@ -22,7 +22,7 @@ local cursor_aug = vim.api.nvim_create_augroup("LiveShareGuestCursor", { clear =
 -- Protocol state machine: "handshake" | "workspace_sync" | "active"
 local state = "handshake"
 local msg_buffer = {} -- patches/cursors buffered during workspace_sync
-local sync_timer = nil -- 10 s watchdog; cancelled when open_files_snapshot arrives
+local sync_timer = nil -- WORKSPACE_SYNC idle watchdog; cancelled on open_files_snapshot
 local last_seq_seen = nil -- global monotonic seq; nil = accept any as first
 
 -- Capabilities this client supports (must match what hello_ack advertises).
@@ -30,6 +30,37 @@ local SUPPORTED_CAPS = { workspace = true, cursor = true, follow = true, termina
 
 local function dbg(m)
   log.dbg("guest", m)
+end
+
+-- WORKSPACE_SYNC watchdog (§8): measures inactivity, not elapsed time — one snapshot
+-- message can take minutes to arrive over a healthy but slow relay.
+local SYNC_IDLE_TIMEOUT_MS = 10000
+
+local function arm_sync_watchdog()
+  if not sync_timer then
+    sync_timer = uv.new_timer()
+  end
+  sync_timer:stop()
+  sync_timer:start(
+    SYNC_IDLE_TIMEOUT_MS,
+    0,
+    vim.schedule_wrap(function()
+      vim.notify(
+        "live-share: no data from the host for "
+          .. math.floor(SYNC_IDLE_TIMEOUT_MS / 1000)
+          .. "s while waiting for the workspace snapshot — disconnecting",
+        vim.log.levels.ERROR
+      )
+      M.stop()
+    end)
+  )
+end
+
+-- Transport-level liveness signal; see connection.lua opts.on_activity.
+local function note_activity()
+  if state == "workspace_sync" and sync_timer then
+    arm_sync_watchdog()
+  end
 end
 
 local function get_username()
@@ -139,6 +170,8 @@ local function on_message(msg)
   -- State gate: during workspace_sync buffer patches/cursors; allow only init
   -- messages and safety signals (bye/error/rejected) to pass through.
   if state == "workspace_sync" then
+    -- Any inbound message is progress, whatever its type.
+    note_activity()
     if msg.t == "patch" or msg.t == "cursor" then
       msg_buffer[#msg_buffer + 1] = msg
       return
@@ -198,17 +231,9 @@ local function on_message(msg)
     -- Acknowledge and advertise all supported caps.
     conn:send({ t = "hello_ack", name = get_username(), caps = { "workspace", "cursor", "follow", "terminal" } })
 
-    -- Transition to workspace_sync and start 10 s watchdog (§8).
+    -- Transition to workspace_sync and arm the idle watchdog (§8).
     state = "workspace_sync"
-    sync_timer = uv.new_timer()
-    sync_timer:start(
-      10000,
-      0,
-      vim.schedule_wrap(function()
-        vim.notify("live-share: timed out waiting for workspace snapshot — disconnecting", vim.log.levels.ERROR)
-        M.stop()
-      end)
-    )
+    arm_sync_watchdog()
 
     vim.schedule(function()
       local role_label = guest_role == "ro" and " [read-only]" or ""
@@ -529,7 +554,12 @@ function M.connect(host_addr, port, key_b64, mode)
       M.stop()
     end)
   else
-    conn = connection.new_connector({ key = session_key, mode = mode or "ws", on_msg = on_message })
+    conn = connection.new_connector({
+      key = session_key,
+      mode = mode or "ws",
+      on_msg = on_message,
+      on_activity = note_activity,
+    })
     require("live-share.shared_terminal").setup("guest", function(msg)
       conn:send(msg)
     end)
