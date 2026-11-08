@@ -148,7 +148,7 @@ describe("tunnel failure reporting", function()
   end)
 
   it("publishes for a provider that exits cleanly after announcing", function()
-    -- The LAN recipe's shape, minus the `sleep infinity` keep-alive: exit 0 is
+    -- The LAN recipe's shape, minus the `tail -f /dev/null` keep-alive: exit 0 is
     -- not a failure, so the announced address must still be published.
     run(writer("tcp://192.168.1.42:9876\\n", 0), "tcp://[%w._-]+:%d+")
 
