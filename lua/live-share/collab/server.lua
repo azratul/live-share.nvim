@@ -60,7 +60,7 @@ function M.start(ip, port, key)
     return false
   end
 
-  srv:listen(128, function(lerr)
+  local listening, listen_err = srv:listen(128, function(lerr)
     if lerr then
       vim.schedule(function()
         vim.api.nvim_err_writeln("live-share server listen error: " .. lerr)
@@ -230,6 +230,17 @@ function M.start(ip, port, key)
       end
     end)
   end)
+  -- On Unix libuv defers EADDRINUSE from bind() to listen(), so a busy port
+  -- only shows up here.
+  if not listening then
+    srv:close()
+    srv = nil
+    session_key = nil
+    vim.schedule(function()
+      vim.api.nvim_err_writeln("live-share: listen failed: " .. tostring(listen_err))
+    end)
+    return false
+  end
   return true
 end
 

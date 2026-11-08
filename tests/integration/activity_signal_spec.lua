@@ -4,7 +4,7 @@ local uv = vim.uv or vim.loop
 local client = require("live-share.collab.client")
 local connection = require("live-share.collab.connection")
 
-local PORT = 19891
+local PORT = 19910
 local TIMEOUT_MS = 3000
 
 local function wait_for(cond)
