@@ -71,7 +71,7 @@ require("live-share.provider").register("lan", {
   command = function(_, port, service_url)
     -- Replace 192.168.1.42 with your machine's LAN IP.
     return string.format(
-      [[printf 'tcp://192.168.1.42:%d\n' > %s; sleep infinity]],
+      [[printf 'tcp://192.168.1.42:%d\n' > %s; tail -f /dev/null]],
       port, service_url)
   end,
   pattern = "tcp://[%w._-]+:%d+",
@@ -89,7 +89,7 @@ Then `:LiveShareHostStart` produces a URL like `tcp://192.168.1.42:9876#key=...`
 > **Why this works.** The provider system polls `service_url` for a public URL pattern; any string that matches the `pattern` regex is treated as the address that gets the `#key=` fragment appended. Writing your LAN address directly is a legitimate use of the API.
 
 > **Caveats.**
-> - The custom command keeps a process alive (`sleep infinity`) because `tunnel.lua` expects the process to remain running for the duration of the session.
+> - The custom command keeps a process alive (`tail -f /dev/null`) because `tunnel.lua` expects the process to remain running for the duration of the session.
 > - Both peers must be reachable on the same L2/L3 segment (no NAT, no VPN split).
 
 ---
@@ -201,7 +201,7 @@ require("live-share.provider").register("my-vps", {
     -- 0.0.0.0:cfg.port:localhost:port_internal — bind the forward to all interfaces on the VPS.
     return string.format(
       "ssh -o StrictHostKeyChecking=no -R 0.0.0.0:%d:localhost:%d user@vps.example.com "
-        .. "'echo tcp://vps.example.com:%d; sleep infinity' > %s 2>/dev/null",
+        .. "'echo tcp://vps.example.com:%d; tail -f /dev/null' > %s 2>/dev/null",
       cfg.port, port_internal, cfg.port, service_url)
   end,
   pattern = "tcp://[%w._-]+:%d+",
